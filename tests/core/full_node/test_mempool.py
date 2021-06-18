@@ -4,8 +4,6 @@ import logging
 from typing import Dict, List, Optional, Tuple, Callable
 
 import pytest
-from clvm import SExp
-from clvm.EvalError import EvalError
 
 import chia.server.ws_connection as ws
 
@@ -21,23 +19,21 @@ from chia.types.condition_with_args import ConditionWithArgs
 from chia.types.spend_bundle import SpendBundle
 from chia.util.clvm import int_to_bytes
 from chia.util.condition_tools import conditions_for_solution
-from chia.util.errors import Err, ValidationError
+from chia.util.errors import Err
 from chia.util.ints import uint64
 from chia.util.hash import std_hash
 from chia.types.mempool_inclusion_status import MempoolInclusionStatus
 from chia.util.api_decorators import api_request, peer_required, bytes_required
-from chia.full_node.mempool_check_conditions import parse_condition_args
+from chia.full_node.mempool_check_conditions import get_name_puzzle_conditions
 
 from tests.connection_utils import connect_and_get_peer
 from tests.core.node_height import node_height_at_least
 from tests.setup_nodes import bt, setup_simulators_and_wallets
 from tests.time_out_assert import time_out_assert
-from chia.types.blockchain_format.program import Program, INFINITE_COST
-from chia.consensus.condition_costs import ConditionCost
-from chia.consensus.cost_calculator import NPCResult
-from chia.types.blockchain_format.program import SerializedProgram
+from chia.types.blockchain_format.program import Program, SerializedProgram, INFINITE_COST
 from clvm_tools import binutils
 from chia.types.generator_types import BlockGenerator
+from chia.consensus.cost_calculator import NPCResult
 from chia.full_node.mempool_check_conditions import get_name_puzzle_conditions
 from clvm.casts import int_from_bytes
 
@@ -447,7 +443,7 @@ class TestMempoolManager:
         assert sb1 is None
         # the transaction may become valid later
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_correct_block_index(self, two_nodes):
@@ -510,7 +506,7 @@ class TestMempoolManager:
         assert sb1 is None
         # the transaction may become valid later
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_correct_block_age(self, two_nodes):
@@ -611,7 +607,7 @@ class TestMempoolManager:
         sb1 = full_node_1.full_node.mempool_manager.get_spendbundle(spend_bundle1.name())
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_assert_time_exceeds(self, two_nodes):
@@ -667,7 +663,7 @@ class TestMempoolManager:
         sb1 = full_node_1.full_node.mempool_manager.get_spendbundle(spend_bundle1.name())
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_assert_time_garbage(self, two_nodes):
@@ -739,7 +735,7 @@ class TestMempoolManager:
         sb1 = full_node_1.full_node.mempool_manager.get_spendbundle(spend_bundle1.name())
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_assert_time_relative_negative(self, two_nodes):
@@ -756,6 +752,7 @@ class TestMempoolManager:
         assert status == MempoolInclusionStatus.SUCCESS
         assert err is None
 
+    # ensure one spend can assert a coin announcement from another spend
     @pytest.mark.asyncio
     async def test_correct_coin_announcement_consumed(self, two_nodes):
         def test_fun(coin_1: Coin, coin_2: Coin) -> SpendBundle:
@@ -778,6 +775,8 @@ class TestMempoolManager:
         assert status == MempoolInclusionStatus.SUCCESS
         assert err is None
 
+    # ensure one spend can assert a coin announcement from another spend, even
+    # though the conditions have garbage (ignored) at the end
     @pytest.mark.asyncio
     async def test_coin_announcement_garbage(self, two_nodes):
         def test_fun(coin_1: Coin, coin_2: Coin) -> SpendBundle:
@@ -821,7 +820,7 @@ class TestMempoolManager:
 
         assert full_node_1.full_node.mempool_manager.get_spendbundle(bundle.name()) is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_coin_announcement_missing_arg2(self, two_nodes):
@@ -843,7 +842,7 @@ class TestMempoolManager:
 
         assert full_node_1.full_node.mempool_manager.get_spendbundle(bundle.name()) is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_coin_announcement_too_big(self, two_nodes):
@@ -878,6 +877,8 @@ class TestMempoolManager:
         except AssertionError:
             pass
 
+    # ensure an assert coin announcement is rejected if it doesn't match the
+    # create announcement
     @pytest.mark.asyncio
     async def test_invalid_coin_announcement_rejected(self, two_nodes):
         full_node_1, full_node_2, server_1, server_2 = two_nodes
@@ -888,7 +889,7 @@ class TestMempoolManager:
             cvp = ConditionWithArgs(ConditionOpcode.ASSERT_COIN_ANNOUNCEMENT, [announce.name()])
 
             dic = {cvp.opcode: [cvp]}
-            # Wrong message
+            # mismatching message
             cvp2 = ConditionWithArgs(
                 ConditionOpcode.CREATE_COIN_ANNOUNCEMENT,
                 [b"wrong test"],
@@ -918,10 +919,7 @@ class TestMempoolManager:
 
             dic = {cvp.opcode: [cvp]}
 
-            cvp2 = ConditionWithArgs(
-                ConditionOpcode.CREATE_COIN_ANNOUNCEMENT,
-                [b"test"],
-            )
+            cvp2 = ConditionWithArgs(ConditionOpcode.CREATE_COIN_ANNOUNCEMENT, [b"test"])
             dic2 = {cvp.opcode: [cvp2]}
             spend_bundle1 = generate_test_spend_bundle(coin_1, dic)
             # coin 2 is making the announcement, right message wrong coin
@@ -1011,7 +1009,7 @@ class TestMempoolManager:
 
         assert mempool_bundle is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_puzzle_announcement_missing_arg2(self, two_nodes):
@@ -1039,7 +1037,7 @@ class TestMempoolManager:
 
         assert mempool_bundle is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_invalid_puzzle_announcement_rejected(self, two_nodes):
@@ -1133,7 +1131,7 @@ class TestMempoolManager:
         dic = {cvp.opcode: [cvp]}
         blocks, spend_bundle1, peer, status, err = await self.condition_tester(two_nodes, dic, fee=10)
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_assert_fee_condition_negative_fee(self, two_nodes):
@@ -1372,7 +1370,7 @@ class TestMempoolManager:
 
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_invalid_my_parent(self, two_nodes):
@@ -1437,7 +1435,7 @@ class TestMempoolManager:
 
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_invalid_my_puzhash(self, two_nodes):
@@ -1501,7 +1499,7 @@ class TestMempoolManager:
 
         assert sb1 is None
         assert status == MempoolInclusionStatus.FAILED
-        assert err == Err.GENERATOR_RUNTIME_ERROR
+        assert err == Err.INVALID_CONDITION
 
     @pytest.mark.asyncio
     async def test_invalid_my_amount(self, two_nodes):
@@ -1563,376 +1561,6 @@ class TestMempoolManager:
         assert err == Err.INVALID_CONDITION
 
 
-class TestConditionParser:
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_agg_sig(self, safe_mode: bool):
-
-        valid_pubkey = b"b" * 48
-        short_pubkey = b"b" * 47
-        long_pubkey = b"b" * 49
-
-        valid_message = b"a" * 1024
-        long_message = b"a" * 1025
-        empty_message = b""
-
-        for condition_code in [ConditionOpcode.AGG_SIG_UNSAFE, ConditionOpcode.AGG_SIG_ME]:
-            cost, args = parse_condition_args(SExp.to([valid_pubkey, valid_message]), condition_code, safe_mode)
-            assert cost == ConditionCost.AGG_SIG.value
-            assert args == [valid_pubkey, valid_message]
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([valid_pubkey, long_message]), condition_code, safe_mode)
-
-            # empty messages are allowed
-            cost, args = parse_condition_args(SExp.to([valid_pubkey, empty_message]), condition_code, safe_mode)
-            assert cost == ConditionCost.AGG_SIG.value
-            assert args == [valid_pubkey, empty_message]
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([short_pubkey, valid_message]), condition_code, safe_mode)
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([long_pubkey, valid_message]), condition_code, safe_mode)
-
-            # missing message argument
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([valid_pubkey]), condition_code, safe_mode)
-
-            # missing all arguments
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([]), condition_code, safe_mode)
-
-            # garbage at the end of the arguments list is allowed but stripped
-            cost, args = parse_condition_args(
-                SExp.to([valid_pubkey, valid_message, b"garbage"]), condition_code, safe_mode
-            )
-            assert cost == ConditionCost.AGG_SIG.value
-            assert args == [valid_pubkey, valid_message]
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_create_coin(self, safe_mode: bool):
-
-        valid_hash = b"b" * 32
-        short_hash = b"b" * 31
-        long_hash = b"b" * 33
-
-        valid_amount = int_to_bytes(1000000000)
-        # this is greater than max coin amount
-        large_amount = int_to_bytes(2 ** 64)
-        leading_zeros_amount = bytes([0] * 100) + int_to_bytes(1000000000)
-        negative_amount = int_to_bytes(-1000)
-        # this ist still -1, but just with a lot of (redundant) 0xff bytes
-        # prepended
-        large_negative_amount = bytes([0xFF] * 100) + int_to_bytes(-1)
-
-        cost, args = parse_condition_args(SExp.to([valid_hash, valid_amount]), ConditionOpcode.CREATE_COIN, safe_mode)
-        assert cost == ConditionCost.CREATE_COIN.value
-        assert args == [valid_hash, valid_amount]
-
-        if safe_mode:
-            # we don't allow over-long encoding in safe-mode
-            with pytest.raises(ValidationError):
-                parse_condition_args(
-                    SExp.to([valid_hash, leading_zeros_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-                )
-        else:
-            cost, args = parse_condition_args(
-                SExp.to([valid_hash, leading_zeros_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-            )
-            assert cost == ConditionCost.CREATE_COIN.value
-            # the amount will have its leading zeros stripped
-            assert args == [valid_hash, valid_amount]
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(
-                SExp.to([valid_hash, large_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-            )
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(
-                SExp.to([short_hash, valid_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-            )
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(
-                SExp.to([long_hash, valid_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-            )
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(
-                SExp.to([valid_hash, negative_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-            )
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(
-                SExp.to([valid_hash, large_negative_amount]), ConditionOpcode.CREATE_COIN, safe_mode
-            )
-
-        # missing amount
-        with pytest.raises(EvalError):
-            cost, args = parse_condition_args(SExp.to([valid_hash]), ConditionOpcode.CREATE_COIN, safe_mode)
-
-        # missing everything
-        with pytest.raises(EvalError):
-            cost, args = parse_condition_args(SExp.to([]), ConditionOpcode.CREATE_COIN, safe_mode)
-
-        # garbage at the end of the arguments list is allowed but stripped
-        cost, args = parse_condition_args(
-            SExp.to([valid_hash, valid_amount, b"garbage"]), ConditionOpcode.CREATE_COIN, safe_mode
-        )
-        assert cost == ConditionCost.CREATE_COIN.value
-        assert args == [valid_hash, valid_amount]
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_seconds(self, safe_mode: bool):
-
-        valid_timestamp = int_to_bytes(100)
-        leading_zeros_timestamp = bytes([0] * 100) + int_to_bytes(100)
-        negative_timestamp = int_to_bytes(-100)
-        large_negative_timestamp = bytes([0xFF] * 100) + int_to_bytes(-1)
-
-        for condition_code in [ConditionOpcode.ASSERT_SECONDS_ABSOLUTE, ConditionOpcode.ASSERT_SECONDS_RELATIVE]:
-            cost, args = parse_condition_args(SExp.to([valid_timestamp]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_timestamp]
-
-            if safe_mode:
-                # we don't allow over-long encodings in strict mode
-                with pytest.raises(ValidationError):
-                    parse_condition_args(SExp.to([leading_zeros_timestamp]), condition_code, safe_mode)
-            else:
-                cost, args = parse_condition_args(SExp.to([leading_zeros_timestamp]), condition_code, safe_mode)
-                assert cost == 0
-                assert args == [valid_timestamp]
-
-            # a condition with a negative timestamp is always true
-            cost, args = parse_condition_args(SExp.to([negative_timestamp]), condition_code, safe_mode)
-            assert cost == 0
-            assert args is None
-
-            cost, args = parse_condition_args(SExp.to([large_negative_timestamp]), condition_code, safe_mode)
-            assert cost == 0
-            assert args is None
-
-            # garbage at the end of the arguments list is allowed but stripped
-            cost, args = parse_condition_args(SExp.to([valid_timestamp, b"garbage"]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_timestamp]
-
-            # missing argument
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([]), condition_code, safe_mode)
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_height(self, safe_mode: bool):
-
-        valid_height = int_to_bytes(100)
-        leading_zeros_height = bytes([0] * 100) + int_to_bytes(100)
-        negative_height = int_to_bytes(-100)
-        large_negative_height = bytes([0xFF] * 100) + int_to_bytes(-1)
-
-        for condition_code in [ConditionOpcode.ASSERT_HEIGHT_ABSOLUTE, ConditionOpcode.ASSERT_HEIGHT_RELATIVE]:
-            cost, args = parse_condition_args(SExp.to([valid_height]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_height]
-
-            if safe_mode:
-                with pytest.raises(ValidationError):
-                    parse_condition_args(SExp.to([leading_zeros_height]), condition_code, safe_mode)
-            else:
-                cost, args = parse_condition_args(SExp.to([leading_zeros_height]), condition_code, safe_mode)
-                assert cost == 0
-                assert args == [valid_height]
-
-            # a condition with a negative height is always true
-            cost, args = parse_condition_args(SExp.to([negative_height]), condition_code, safe_mode)
-            assert cost == 0
-            assert args is None
-
-            cost, args = parse_condition_args(SExp.to([large_negative_height]), condition_code, safe_mode)
-            assert cost == 0
-            assert args is None
-
-            # garbage at the end of the arguments list is allowed but stripped
-            cost, args = parse_condition_args(SExp.to([valid_height, b"garbage"]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_height]
-
-            # missing argument
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([]), condition_code, safe_mode)
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_coin_id(self, safe_mode: bool):
-
-        valid_coin_id = b"a" * 32
-        short_coin_id = b"a" * 31
-        long_coin_id = b"a" * 33
-
-        for condition_code in [ConditionOpcode.ASSERT_MY_COIN_ID, ConditionOpcode.ASSERT_MY_PARENT_ID]:
-            cost, args = parse_condition_args(SExp.to([valid_coin_id]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_coin_id]
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([short_coin_id]), condition_code, safe_mode)
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([long_coin_id]), condition_code, safe_mode)
-
-            # garbage at the end of the arguments list is allowed but stripped
-            cost, args = parse_condition_args(SExp.to([valid_coin_id, b"garbage"]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_coin_id]
-
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([]), condition_code, safe_mode)
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_fee(self, safe_mode: bool):
-
-        valid_fee = int_to_bytes(100)
-        leading_zeros_fee = bytes([0] * 100) + int_to_bytes(100)
-        negative_fee = int_to_bytes(-100)
-        large_negative_fee = bytes([0xFF] * 100) + int_to_bytes(-1)
-        large_fee = int_to_bytes(2 ** 64)
-
-        cost, args = parse_condition_args(SExp.to([valid_fee]), ConditionOpcode.RESERVE_FEE, safe_mode)
-        assert cost == 0
-        assert args == [valid_fee]
-
-        if safe_mode:
-            with pytest.raises(ValidationError):
-                parse_condition_args(SExp.to([leading_zeros_fee]), ConditionOpcode.RESERVE_FEE, safe_mode)
-        else:
-            cost, args = parse_condition_args(SExp.to([leading_zeros_fee]), ConditionOpcode.RESERVE_FEE, safe_mode)
-            assert cost == 0
-            assert args == [valid_fee]
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(SExp.to([negative_fee]), ConditionOpcode.RESERVE_FEE, safe_mode)
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(SExp.to([large_fee]), ConditionOpcode.RESERVE_FEE, safe_mode)
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(SExp.to([large_negative_fee]), ConditionOpcode.RESERVE_FEE, safe_mode)
-
-        # garbage at the end of the arguments list is allowed but stripped
-        cost, args = parse_condition_args(SExp.to([valid_fee, b"garbage"]), ConditionOpcode.RESERVE_FEE, safe_mode)
-        assert cost == 0
-        assert args == [valid_fee]
-
-        # missing argument
-        with pytest.raises(EvalError):
-            cost, args = parse_condition_args(SExp.to([]), ConditionOpcode.RESERVE_FEE, safe_mode)
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_create_announcement(self, safe_mode: bool):
-
-        valid_msg = b"a" * 1024
-        long_msg = b"a" * 1025
-        empty_msg = b""
-
-        for condition_code in [ConditionOpcode.CREATE_COIN_ANNOUNCEMENT, ConditionOpcode.CREATE_PUZZLE_ANNOUNCEMENT]:
-            cost, args = parse_condition_args(SExp.to([valid_msg]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_msg]
-
-            cost, args = parse_condition_args(SExp.to([empty_msg]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [empty_msg]
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([long_msg]), condition_code, safe_mode)
-
-            # missing argument
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([]), condition_code, safe_mode)
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_assert_announcement(self, safe_mode: bool):
-
-        valid_hash = b"b" * 32
-        short_hash = b"b" * 31
-        long_hash = b"b" * 33
-
-        for condition_code in [
-            ConditionOpcode.ASSERT_COIN_ANNOUNCEMENT,
-            ConditionOpcode.ASSERT_PUZZLE_ANNOUNCEMENT,
-            ConditionOpcode.ASSERT_MY_PUZZLEHASH,
-        ]:
-            cost, args = parse_condition_args(SExp.to([valid_hash]), condition_code, safe_mode)
-            assert cost == 0
-            assert args == [valid_hash]
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([short_hash]), condition_code, safe_mode)
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([long_hash]), condition_code, safe_mode)
-
-            # missing argument
-            with pytest.raises(EvalError):
-                cost, args = parse_condition_args(SExp.to([]), condition_code, safe_mode)
-
-    @pytest.mark.parametrize("safe_mode", [True, False])
-    def test_parse_condition_my_amount(self, safe_mode: bool):
-
-        valid_amount = int_to_bytes(100)
-        leading_zeros_amount = bytes([0] * 100) + int_to_bytes(100)
-        negative_amount = int_to_bytes(-100)
-        large_negative_amount = bytes([0xFF] * 100) + int_to_bytes(-1)
-        large_amount = int_to_bytes(2 ** 64)
-
-        cost, args = parse_condition_args(SExp.to([valid_amount]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode)
-        assert cost == 0
-        assert args == [valid_amount]
-
-        if safe_mode:
-            with pytest.raises(ValidationError):
-                parse_condition_args(SExp.to([leading_zeros_amount]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode)
-        else:
-            cost, args = parse_condition_args(
-                SExp.to([leading_zeros_amount]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode
-            )
-            assert cost == 0
-            assert args == [valid_amount]
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(SExp.to([negative_amount]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode)
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(SExp.to([large_amount]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode)
-
-        with pytest.raises(ValidationError):
-            cost, args = parse_condition_args(
-                SExp.to([large_negative_amount]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode
-            )
-
-        # garbage at the end of the arguments list is allowed but stripped
-        cost, args = parse_condition_args(
-            SExp.to([valid_amount, b"garbage"]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode
-        )
-        assert cost == 0
-        assert args == [valid_amount]
-
-        # missing argument
-        with pytest.raises(EvalError):
-            cost, args = parse_condition_args(SExp.to([]), ConditionOpcode.ASSERT_MY_AMOUNT, safe_mode)
-
-    def test_parse_unknown_condition(self):
-
-        for opcode in [129, 0, 1, 1000, 74]:
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([b"test"]), opcode, False)
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([b"foo", b"bar"]), opcode, False)
-
-            with pytest.raises(ValidationError):
-                cost, args = parse_condition_args(SExp.to([]), opcode, False)
-
 # the following tests generate generator programs and run them through get_name_puzzle_conditions()
 
 COST_PER_BYTE = 12000
@@ -1982,7 +1610,7 @@ class TestGeneratorConditions:
             assert len(npc_result.npc_list) == 1
             # create-announcements and assert-announcements are dropped once
             # validated
-#            assert npc_result.npc_list[0].conditions == []
+            assert npc_result.npc_list[0].conditions == []
 
     def test_multiple_reserve_fee(self):
         # RESERVE_FEE
@@ -2002,15 +1630,15 @@ class TestGeneratorConditions:
 
         assert reserve_fee == 300
 
-#    def test_duplicate_outputs(self):
+    def test_duplicate_outputs(self):
         # CREATE_COIN
         # creating multiple coins with the same properties (same parent, same
         # target puzzle hash and same amount) is not allowed. That's a consensus
         # failure.
-#        puzzle_hash = "abababababababababababababababab"
-#        npc_result = generator_condition_tester(f'(51 "{puzzle_hash}" 10) ' * 2)
-#        assert npc_result.error == Err.DUPLICATE_OUTPUT.value
-#        assert len(npc_result.npc_list) == 0
+        puzzle_hash = "abababababababababababababababab"
+        npc_result = generator_condition_tester(f'(51 "{puzzle_hash}" 10) ' * 2)
+        assert npc_result.error == Err.DUPLICATE_OUTPUT.value
+        assert len(npc_result.npc_list) == 0
 
     def test_create_coin_cost(self):
         # CREATE_COIN
@@ -2117,4 +1745,4 @@ class TestGeneratorConditions:
                     assert npc_result.npc_list == []
                 else:
                     assert npc_result.error is None
-#                    assert npc_result.npc_list[0].conditions == []
+                    assert npc_result.npc_list[0].conditions == []
