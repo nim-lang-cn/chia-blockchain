@@ -132,9 +132,7 @@ jobs:
           prerelease: true
           title: Latest-Release
           files: |
-            ${{ github.workspace }}\chia-blockchain-gui\release-builds\windows-installer\ChiaSetup-*.exe
-            ${{ github.workspace }}\chia-blockchain-gui\release-builds\windows-installer\ChiaSetup-*.exe.checksum
-            ${{ github.workspace }}\chia-blockchain-gui\release-builds\windows-installer\ChiaSetup-*.exe.torrent
+            ${{ github.workspace }}\chia-blockchain-gui\release-builds\windows-installer\*.exe
               
     - name: Get tag name
       if: startsWith(github.ref, 'refs/tags/')
