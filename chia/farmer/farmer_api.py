@@ -221,7 +221,8 @@ class FarmerAPI:
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
                             f"{pool_url}/partial",
-                            json=post_partial_request.to_json_dict(),
+                            data=post_partial_body,
+                            headers=headers,
                             ssl=ssl_context_for_root(get_mozilla_ca_crt()),
                         ) as resp:
                             if resp.ok:
