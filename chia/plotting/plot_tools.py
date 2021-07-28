@@ -194,12 +194,12 @@ def load_plots(
                 # TODO: consider checking if the file was just written to (which would mean that the file is still
                 # being copied). A segfault might happen in this edge case.
 
-                if prover.get_size() >= 30 and stat_info.st_size < 0.98 * expected_size:
-                    log.warning(
-                        f"Not farming plot {filename}. Size is {stat_info.st_size / (1024**3)} GiB, but expected"
-                        f" at least: {expected_size / (1024 ** 3)} GiB. We assume the file is being copied."
-                    )
-                    return 0, new_provers
+                # if prover.get_size() >= 30 and stat_info.st_size < 0.98 * expected_size:
+                #     log.warning(
+                #         f"Not farming plot {filename}. Size is {stat_info.st_size / (1024**3)} GiB, but expected"
+                #         f" at least: {expected_size / (1024 ** 3)} GiB. We assume the file is being copied."
+                #     )
+                #     return 0, new_provers
 
                 (
                     pool_public_key_or_puzzle_hash,
