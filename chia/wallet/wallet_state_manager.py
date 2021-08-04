@@ -5,7 +5,9 @@ import logging
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from chia.util.path import mkdir, path_from_root
+
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple,OrderedDict
 
 import aiosqlite
 from blspy import AugSchemeMPL, G1Element, PrivateKey
@@ -24,7 +26,7 @@ from chia.protocols.wallet_protocol import PuzzleSolutionResponse, RespondPuzzle
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.types.coin_spend import CoinSpend
+from chia.types.coin_solution import CoinSolution
 from chia.types.full_block import FullBlock
 from chia.types.header_block import HeaderBlock
 from chia.types.mempool_inclusion_status import MempoolInclusionStatus
@@ -90,7 +92,7 @@ class WalletStateManager:
     puzzle_hash_created_callbacks: Dict = defaultdict(lambda *x: None)
     new_peak_callbacks: Dict = defaultdict(lambda *x: None)
     db_path: Path
-    db_connection: aiosqlite.Connection
+    db_connection: Dict[str, aiosqlite.Connection]
     db_wrapper: DBWrapper
 
     main_wallet: Wallet
@@ -129,7 +131,15 @@ class WalletStateManager:
         self.log = logging.getLogger(name if name else __name__)
         self.lock = asyncio.Lock()
         self.log.debug(f"Starting in db path: {db_path}")
-        self.db_connection = await aiosqlite.connect(db_path)
+        self.db_connection = Dict()
+        self.db_connection["chia"] = await aiosqlite.connect(db_path)
+
+        gojiPath = str(db_path).replace("/.chia","/.goji-blockchain")
+        self.db_connection["goji"] = await aiosqlite.connect(Path(gojiPath))
+        flaxPath = str(db_path).replace("/.chia","/.flax")
+        self.db_connection["flax"] = await aiosqlite.connect(Path(flaxPath))
+
+        # self.db_connection_nim = await aiosqlite.connect(db_path)
         self.db_wrapper = DBWrapper(self.db_connection)
         self.coin_store = await WalletCoinStore.create(self.db_wrapper)
         self.tx_store = await WalletTransactionStore.create(self.db_wrapper)
@@ -567,7 +577,7 @@ class WalletStateManager:
         removals: List[Coin],
         additions: List[Coin],
         block: BlockRecord,
-        additional_coin_spends: List[CoinSpend],
+        additional_coin_spends: List[CoinSolution],
     ):
         height: uint32 = block.height
         for coin in additions:
@@ -1018,10 +1028,10 @@ class WalletStateManager:
             self.wallets.pop(wallet_id)
             self.new_peak_callbacks.pop(wallet_id)
 
-    async def close_all_stores(self) -> None:
+    async def close_all_stores(self, db="chia") -> None:
         if self.blockchain is not None:
             self.blockchain.shut_down()
-        await self.db_connection.close()
+        await self.db_connection[db].close()
 
     async def clear_all_stores(self):
         await self.coin_store._clear_database()
@@ -1213,7 +1223,7 @@ class WalletStateManager:
     def get_peak(self) -> Optional[BlockRecord]:
         return self.blockchain.get_peak()
 
-    async def get_next_interesting_coin_ids(self, spend: CoinSpend, in_transaction: bool) -> List[bytes32]:
+    async def get_next_interesting_coin_ids(self, spend: CoinSolution, in_transaction: bool) -> List[bytes32]:
         pool_wallet_interested: List[bytes32] = PoolWallet.get_next_interesting_coin_ids(spend)
         for coin_id in pool_wallet_interested:
             await self.interested_store.add_interested_coin_id(coin_id, in_transaction)

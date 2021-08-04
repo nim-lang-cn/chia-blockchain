@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class BlockStore:
-    db: aiosqlite.Connection
+    db:Dict[str, aiosqlite.Connection]
     block_cache: LRUCache
     db_wrapper: DBWrapper
     ses_challenge_cache: LRUCache

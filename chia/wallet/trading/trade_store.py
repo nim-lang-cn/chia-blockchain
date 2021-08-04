@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional,Dict
 
 import aiosqlite
 
@@ -16,21 +16,21 @@ class TradeStore:
     TradeStore stores trading history.
     """
 
-    db_connection: aiosqlite.Connection
+    db_connection: Dict[str,aiosqlite.Connection]
     cache_size: uint32
     db_wrapper: DBWrapper
 
     @classmethod
-    async def create(cls, db_wrapper: DBWrapper, cache_size: uint32 = uint32(600000)):
+    async def create(cls, db_wrapper: DBWrapper, cache_size: uint32 = uint32(600000), db="chia"):
         self = cls()
 
         self.cache_size = cache_size
         self.db_wrapper = db_wrapper
         self.db_connection = db_wrapper.db
 
-        await self.db_connection.execute("pragma journal_mode=wal")
-        await self.db_connection.execute("pragma synchronous=2")
-        await self.db_connection.execute(
+        await self.db_connection[db].execute("pragma journal_mode=wal")
+        await self.db_connection[db].execute("pragma synchronous=2")
+        await self.db_connection[db].execute(
             (
                 "CREATE TABLE IF NOT EXISTS trade_records("
                 " trade_record blob,"
@@ -42,28 +42,28 @@ class TradeStore:
             )
         )
 
-        await self.db_connection.execute(
+        await self.db_connection[db].execute(
             "CREATE INDEX IF NOT EXISTS trade_confirmed_index on trade_records(confirmed_at_index)"
         )
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS trade_status on trade_records(status)")
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS trade_id on trade_records(trade_id)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS trade_status on trade_records(status)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS trade_id on trade_records(trade_id)")
 
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
         return self
 
-    async def _clear_database(self):
-        cursor = await self.db_connection.execute("DELETE FROM trade_records")
+    async def _clear_database(self, db="chia"):
+        cursor = await self.db_connection[db].execute("DELETE FROM trade_records")
         await cursor.close()
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
 
-    async def add_trade_record(self, record: TradeRecord, in_transaction) -> None:
+    async def add_trade_record(self, record: TradeRecord, in_transaction, db="chia") -> None:
         """
         Store TradeRecord into DB
         """
         if not in_transaction:
             await self.db_wrapper.lock.acquire()
         try:
-            cursor = await self.db_connection.execute(
+            cursor = await self.db_connection[db].execute(
                 "INSERT OR REPLACE INTO trade_records VALUES(?, ?, ?, ?, ?, ?)",
                 (
                     bytes(record),
@@ -77,7 +77,7 @@ class TradeStore:
             await cursor.close()
         finally:
             if not in_transaction:
-                await self.db_connection.commit()
+                await self.db_connection[db].commit()
                 self.db_wrapper.lock.release()
 
     async def set_status(self, trade_id: bytes32, status: TradeStatus, in_transaction: bool, index: uint32 = uint32(0)):
@@ -176,11 +176,11 @@ class TradeStore:
 
         await self.add_trade_record(tx, False)
 
-    async def get_trade_record(self, trade_id: bytes32) -> Optional[TradeRecord]:
+    async def get_trade_record(self, trade_id: bytes32, db="chia") -> Optional[TradeRecord]:
         """
         Checks DB for TradeRecord with id: id and returns it.
         """
-        cursor = await self.db_connection.execute("SELECT * from trade_records WHERE trade_id=?", (trade_id.hex(),))
+        cursor = await self.db_connection[db].execute("SELECT * from trade_records WHERE trade_id=?", (trade_id.hex(),))
         row = await cursor.fetchone()
         await cursor.close()
         if row is not None:
@@ -188,11 +188,11 @@ class TradeStore:
             return record
         return None
 
-    async def get_trade_record_with_status(self, status: TradeStatus) -> List[TradeRecord]:
+    async def get_trade_record_with_status(self, status: TradeStatus, db="chia") -> List[TradeRecord]:
         """
         Checks DB for TradeRecord with id: id and returns it.
         """
-        cursor = await self.db_connection.execute("SELECT * from trade_records WHERE status=?", (status.value,))
+        cursor = await self.db_connection[db].execute("SELECT * from trade_records WHERE status=?", (status.value,))
         rows = await cursor.fetchall()
         await cursor.close()
         records = []
@@ -202,12 +202,12 @@ class TradeStore:
 
         return records
 
-    async def get_not_sent(self) -> List[TradeRecord]:
+    async def get_not_sent(self, db="chia") -> List[TradeRecord]:
         """
         Returns the list of trades that have not been received by full node yet.
         """
 
-        cursor = await self.db_connection.execute(
+        cursor = await self.db_connection[db].execute(
             "SELECT * from trade_records WHERE sent<? and confirmed=?",
             (
                 4,
@@ -223,12 +223,12 @@ class TradeStore:
 
         return records
 
-    async def get_all_unconfirmed(self) -> List[TradeRecord]:
+    async def get_all_unconfirmed(self, db="chia") -> List[TradeRecord]:
         """
         Returns the list of all trades that have not yet been confirmed.
         """
 
-        cursor = await self.db_connection.execute("SELECT * from trade_records WHERE confirmed=?", (0,))
+        cursor = await self.db_connection[db].execute("SELECT * from trade_records WHERE confirmed=?", (0,))
         rows = await cursor.fetchall()
         await cursor.close()
         records = []
@@ -239,12 +239,12 @@ class TradeStore:
 
         return records
 
-    async def get_all_trades(self) -> List[TradeRecord]:
+    async def get_all_trades(self, db="chia") -> List[TradeRecord]:
         """
         Returns all stored trades.
         """
 
-        cursor = await self.db_connection.execute("SELECT * from trade_records")
+        cursor = await self.db_connection[db].execute("SELECT * from trade_records")
         rows = await cursor.fetchall()
         await cursor.close()
         records = []
@@ -255,8 +255,8 @@ class TradeStore:
 
         return records
 
-    async def get_trades_above(self, height: uint32) -> List[TradeRecord]:
-        cursor = await self.db_connection.execute("SELECT * from trade_records WHERE confirmed_at_index>?", (height,))
+    async def get_trades_above(self, height: uint32, db="chia") -> List[TradeRecord]:
+        cursor = await self.db_connection[db].execute("SELECT * from trade_records WHERE confirmed_at_index>?", (height,))
         rows = await cursor.fetchall()
         await cursor.close()
         records = []
@@ -267,11 +267,11 @@ class TradeStore:
 
         return records
 
-    async def rollback_to_block(self, block_index):
+    async def rollback_to_block(self, block_index, db="chia"):
 
         # Delete from storage
-        cursor = await self.db_connection.execute(
+        cursor = await self.db_connection[db].execute(
             "DELETE FROM trade_records WHERE confirmed_at_index>?", (block_index,)
         )
         await cursor.close()
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()

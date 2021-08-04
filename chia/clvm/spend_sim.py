@@ -52,7 +52,7 @@ class TestBlockRecord:
 
 class SpendSim:
 
-    connection: aiosqlite.Connection
+    connection:Dict[str, aiosqlite.Connection]
     mempool_manager: MempoolManager
     block_records: List[TestBlockRecord]
     blocks: List[TestFullBlock]

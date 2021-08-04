@@ -9,6 +9,7 @@ from chia.util.db_wrapper import DBWrapper
 from chia.util.ints import uint32, uint64
 from chia.wallet.util.wallet_types import WalletType
 from chia.wallet.wallet_coin_record import WalletCoinRecord
+from typing import Dict
 
 
 class WalletCoinStore:
@@ -16,7 +17,7 @@ class WalletCoinStore:
     This object handles CoinRecords in DB used by wallet.
     """
 
-    db_connection: aiosqlite.Connection
+    db_connection: Dict[str, aiosqlite.Connection]
     # coin_record_cache keeps ALL coin records in memory. [record_name: record]
     coin_record_cache: Dict[bytes32, WalletCoinRecord]
     # unspent_coin_wallet_cache keeps ALL unspent coin records for wallet in memory [wallet_id: [record_name: record]]
@@ -24,15 +25,15 @@ class WalletCoinStore:
     db_wrapper: DBWrapper
 
     @classmethod
-    async def create(cls, wrapper: DBWrapper):
+    async def create(cls, wrapper: DBWrapper, db: str="chia"):
         self = cls()
 
         self.db_connection = wrapper.db
         self.db_wrapper = wrapper
-        await self.db_connection.execute("pragma journal_mode=wal")
-        await self.db_connection.execute("pragma synchronous=2")
+        await self.db_connection[db].execute("pragma journal_mode=wal")
+        await self.db_connection[db].execute("pragma synchronous=2")
 
-        await self.db_connection.execute(
+        await self.db_connection[db].execute(
             (
                 "CREATE TABLE IF NOT EXISTS coin_record("
                 "coin_name text PRIMARY KEY,"
@@ -49,28 +50,28 @@ class WalletCoinStore:
         )
 
         # Useful for reorg lookups
-        await self.db_connection.execute(
+        await self.db_connection[db].execute(
             "CREATE INDEX IF NOT EXISTS coin_confirmed_height on coin_record(confirmed_height)"
         )
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS coin_spent_height on coin_record(spent_height)")
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS coin_spent on coin_record(spent)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS coin_spent_height on coin_record(spent_height)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS coin_spent on coin_record(spent)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS coin_puzzlehash on coin_record(puzzle_hash)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS coin_puzzlehash on coin_record(puzzle_hash)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS wallet_type on coin_record(wallet_type)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS wallet_type on coin_record(wallet_type)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS wallet_id on coin_record(wallet_id)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS wallet_id on coin_record(wallet_id)")
 
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
         self.coin_record_cache = {}
         self.unspent_coin_wallet_cache = {}
         await self.rebuild_wallet_cache()
         return self
 
-    async def _clear_database(self):
-        cursor = await self.db_connection.execute("DELETE FROM coin_record")
+    async def _clear_database(self, db="chia"):
+        cursor = await self.db_connection[db].execute("DELETE FROM coin_record")
         await cursor.close()
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
 
     async def rebuild_wallet_cache(self):
         # First update all coins that were reorged, then re-add coin_records
@@ -86,7 +87,7 @@ class WalletCoinStore:
                 self.unspent_coin_wallet_cache[coin_record.wallet_id][name] = coin_record
 
     # Store CoinRecord in DB and ram cache
-    async def add_coin_record(self, record: WalletCoinRecord) -> None:
+    async def add_coin_record(self, record: WalletCoinRecord, db="chia") -> None:
         # update wallet cache
         name = record.name()
         self.coin_record_cache[name] = record
@@ -100,7 +101,7 @@ class WalletCoinStore:
                 self.unspent_coin_wallet_cache[record.wallet_id] = {}
                 self.unspent_coin_wallet_cache[record.wallet_id][name] = record
 
-        cursor = await self.db_connection.execute(
+        cursor = await self.db_connection[db].execute(
             "INSERT OR REPLACE INTO coin_record VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name.hex(),
@@ -142,11 +143,11 @@ class WalletCoinStore:
             coin, uint32(row[1]), uint32(row[2]), bool(row[3]), bool(row[4]), WalletType(row[8]), row[9]
         )
 
-    async def get_coin_record(self, coin_name: bytes32) -> Optional[WalletCoinRecord]:
+    async def get_coin_record(self, coin_name: bytes32,db="chia") -> Optional[WalletCoinRecord]:
         """Returns CoinRecord with specified coin id."""
         if coin_name in self.coin_record_cache:
             return self.coin_record_cache[coin_name]
-        cursor = await self.db_connection.execute("SELECT * from coin_record WHERE coin_name=?", (coin_name.hex(),))
+        cursor = await self.db_connection[db].execute("SELECT * from coin_record WHERE coin_name=?", (coin_name.hex(),))
         row = await cursor.fetchone()
         await cursor.close()
 
@@ -154,9 +155,9 @@ class WalletCoinStore:
             return None
         return self.coin_record_from_row(row)
 
-    async def get_first_coin_height(self) -> Optional[uint32]:
+    async def get_first_coin_height(self,db="chia") -> Optional[uint32]:
         """Returns height of first confirmed coin"""
-        cursor = await self.db_connection.execute("SELECT MIN(confirmed_height) FROM coin_record;")
+        cursor = await self.db_connection[db].execute("SELECT MIN(confirmed_height) FROM coin_record;")
         row = await cursor.fetchone()
         await cursor.close()
 
@@ -195,24 +196,24 @@ class WalletCoinStore:
         else:
             return set()
 
-    async def get_all_coins(self) -> Set[WalletCoinRecord]:
+    async def get_all_coins(self,db="chia") -> Set[WalletCoinRecord]:
         """Returns set of all CoinRecords."""
-        cursor = await self.db_connection.execute("SELECT * from coin_record")
+        cursor = await self.db_connection[db].execute("SELECT * from coin_record")
         rows = await cursor.fetchall()
         await cursor.close()
 
         return set(self.coin_record_from_row(row) for row in rows)
 
     # Checks DB and DiffStores for CoinRecords with puzzle_hash and returns them
-    async def get_coin_records_by_puzzle_hash(self, puzzle_hash: bytes32) -> List[WalletCoinRecord]:
+    async def get_coin_records_by_puzzle_hash(self, puzzle_hash: bytes32,db="chia") -> List[WalletCoinRecord]:
         """Returns a list of all coin records with the given puzzle hash"""
-        cursor = await self.db_connection.execute("SELECT * from coin_record WHERE puzzle_hash=?", (puzzle_hash.hex(),))
+        cursor = await self.db_connection[db].execute("SELECT * from coin_record WHERE puzzle_hash=?", (puzzle_hash.hex(),))
         rows = await cursor.fetchall()
         await cursor.close()
 
         return [self.coin_record_from_row(row) for row in rows]
 
-    async def rollback_to_block(self, height: int):
+    async def rollback_to_block(self, height: int,db="chia"):
         """
         Rolls back the blockchain to block_index. All blocks confirmed after this point
         are removed from the LCA. All coins confirmed after this point are removed.
@@ -243,9 +244,9 @@ class WalletCoinStore:
                 if coin_record.coin.name() in coin_cache:
                     coin_cache.pop(coin_record.coin.name())
 
-        c1 = await self.db_connection.execute("DELETE FROM coin_record WHERE confirmed_height>?", (height,))
+        c1 = await self.db_connection[db].execute("DELETE FROM coin_record WHERE confirmed_height>?", (height,))
         await c1.close()
-        c2 = await self.db_connection.execute(
+        c2 = await self.db_connection[db].execute(
             "UPDATE coin_record SET spent_height = 0, spent = 0 WHERE spent_height>?",
             (height,),
         )

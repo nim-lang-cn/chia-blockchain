@@ -6,6 +6,7 @@ from chia.util.db_wrapper import DBWrapper
 from chia.util.ints import uint32
 from chia.wallet.util.wallet_types import WalletType
 from chia.wallet.wallet_info import WalletInfo
+from typing import Dict
 
 
 class WalletUserStore:
@@ -13,19 +14,19 @@ class WalletUserStore:
     WalletUserStore keeps track of all user created wallets and necessary smart-contract data
     """
 
-    db_connection: aiosqlite.Connection
+    db_connection: Dict[str,aiosqlite.Connection]
     cache_size: uint32
     db_wrapper: DBWrapper
 
     @classmethod
-    async def create(cls, db_wrapper: DBWrapper):
+    async def create(cls, db_wrapper: DBWrapper, db="chia"):
         self = cls()
 
         self.db_wrapper = db_wrapper
         self.db_connection = db_wrapper.db
-        await self.db_connection.execute("pragma journal_mode=wal")
-        await self.db_connection.execute("pragma synchronous=2")
-        await self.db_connection.execute(
+        await self.db_connection[db].execute("pragma journal_mode=wal")
+        await self.db_connection[db].execute("pragma synchronous=2")
+        await self.db_connection[db].execute(
             (
                 "CREATE TABLE IF NOT EXISTS users_wallets("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -35,13 +36,13 @@ class WalletUserStore:
             )
         )
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS name on users_wallets(name)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS name on users_wallets(name)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS type on users_wallets(wallet_type)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS type on users_wallets(wallet_type)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS data on users_wallets(data)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS data on users_wallets(data)")
 
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
         await self.init_wallet()
         return self
 
@@ -49,47 +50,49 @@ class WalletUserStore:
         all_wallets = await self.get_all_wallet_info_entries()
         if len(all_wallets) == 0:
             await self.create_wallet("Chia Wallet", WalletType.STANDARD_WALLET, "")
+            await self.create_wallet("Flax Wallet", WalletType.STANDARD_WALLET, "")
+            await self.create_wallet("Goji Wallet", WalletType.STANDARD_WALLET, "")
 
-    async def _clear_database(self):
-        cursor = await self.db_connection.execute("DELETE FROM users_wallets")
+    async def _clear_database(self, db="chia"):
+        cursor = await self.db_connection[db].execute("DELETE FROM users_wallets")
         await cursor.close()
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
 
     async def create_wallet(
-        self, name: str, wallet_type: int, data: str, id: Optional[int] = None, in_transaction=False
+        self, name: str, wallet_type: int, data: str, id: Optional[int] = None, in_transaction=False, db="chia"
     ) -> Optional[WalletInfo]:
 
         if not in_transaction:
             await self.db_wrapper.lock.acquire()
         try:
-            cursor = await self.db_connection.execute(
+            cursor = await self.db_connection[db].execute(
                 "INSERT INTO users_wallets VALUES(?, ?, ?, ?)",
                 (id, name, wallet_type, data),
             )
             await cursor.close()
         finally:
             if not in_transaction:
-                await self.db_connection.commit()
+                await self.db_connection[db].commit()
                 self.db_wrapper.lock.release()
 
         return await self.get_last_wallet()
 
-    async def delete_wallet(self, id: int, in_transaction: bool):
+    async def delete_wallet(self, id: int, in_transaction: bool, db="chia"):
         if not in_transaction:
             await self.db_wrapper.lock.acquire()
         try:
-            cursor = await self.db_connection.execute(f"DELETE FROM users_wallets where id={id}")
+            cursor = await self.db_connection[db].execute(f"DELETE FROM users_wallets where id={id}")
             await cursor.close()
         finally:
             if not in_transaction:
-                await self.db_connection.commit()
+                await self.db_connection[db].commit()
                 self.db_wrapper.lock.release()
 
-    async def update_wallet(self, wallet_info: WalletInfo, in_transaction):
+    async def update_wallet(self, wallet_info: WalletInfo, in_transaction, db="chia"):
         if not in_transaction:
             await self.db_wrapper.lock.acquire()
         try:
-            cursor = await self.db_connection.execute(
+            cursor = await self.db_connection[db].execute(
                 "INSERT or REPLACE INTO users_wallets VALUES(?, ?, ?, ?)",
                 (
                     wallet_info.id,
@@ -101,11 +104,11 @@ class WalletUserStore:
             await cursor.close()
         finally:
             if not in_transaction:
-                await self.db_connection.commit()
+                await self.db_connection[db].commit()
                 self.db_wrapper.lock.release()
 
-    async def get_last_wallet(self) -> Optional[WalletInfo]:
-        cursor = await self.db_connection.execute("SELECT MAX(id) FROM users_wallets;")
+    async def get_last_wallet(self, db="chia") -> Optional[WalletInfo]:
+        cursor = await self.db_connection[db].execute("SELECT MAX(id) FROM users_wallets;")
         row = await cursor.fetchone()
         await cursor.close()
 
@@ -114,12 +117,11 @@ class WalletUserStore:
 
         return await self.get_wallet_by_id(row[0])
 
-    async def get_all_wallet_info_entries(self) -> List[WalletInfo]:
+    async def get_all_wallet_info_entries(self, db="chia") -> List[WalletInfo]:
         """
         Return a set containing all wallets
         """
-
-        cursor = await self.db_connection.execute("SELECT * from users_wallets")
+        cursor = await self.db_connection[db].execute("SELECT * from users_wallets")
         rows = await cursor.fetchall()
         await cursor.close()
         result = []
@@ -129,12 +131,12 @@ class WalletUserStore:
 
         return result
 
-    async def get_wallet_by_id(self, id: int) -> Optional[WalletInfo]:
+    async def get_wallet_by_id(self, id: int, db="chia") -> Optional[WalletInfo]:
         """
         Return a wallet by id
         """
 
-        cursor = await self.db_connection.execute("SELECT * from users_wallets WHERE id=?", (id,))
+        cursor = await self.db_connection[db].execute("SELECT * from users_wallets WHERE id=?", (id,))
         row = await cursor.fetchone()
         await cursor.close()
 

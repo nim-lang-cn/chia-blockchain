@@ -66,7 +66,7 @@ class FullNode:
     sync_store: Any
     coin_store: CoinStore
     mempool_manager: MempoolManager
-    connection: aiosqlite.Connection
+    connection:Dict[str, aiosqlite.Connection]
     _sync_task: Optional[asyncio.Task]
     _init_weight_proof: Optional[asyncio.Task] = None
     blockchain: Blockchain

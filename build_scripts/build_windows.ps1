@@ -18,7 +18,7 @@ If ($LastExitCode -gt 0){
 }
 else
 {
-    Set-Location -Path - -PassThru
+    Set-Location -Path ..\.. -PassThru
     Write-Output "miniupnpc download successful."
 }
 
@@ -81,19 +81,19 @@ Write-Output "   ---"
 Write-Output "Prepare Electron packager"
 Write-Output "   ---"
 $Env:NODE_OPTIONS = "--max-old-space-size=3000"
-npm install --save-dev electron-winstaller
-npm install -g electron-packager
-npm install
-npm audit fix
+pnpm install --save-dev electron-winstaller
+pnpm install -g electron-packager
+pnpm install
+pnpm audit fix
 
 git status
 
 Write-Output "   ---"
 Write-Output "Electron package Windows Installer"
 Write-Output "   ---"
-npm run build
+pnpm run build
 If ($LastExitCode -gt 0){
-    Throw "npm run build failed!"
+    Throw "pnpm run build failed!"
 }
 
 Write-Output "   ---"

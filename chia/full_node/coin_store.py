@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional,Dict
 
 import aiosqlite
 
@@ -17,7 +17,7 @@ class CoinStore:
     A cache is maintained for quicker access to recent coins.
     """
 
-    coin_record_db: aiosqlite.Connection
+    coin_record_db:Dict[str, aiosqlite.Connection]
     coin_record_cache: LRUCache
     cache_size: uint32
     db_wrapper: DBWrapper

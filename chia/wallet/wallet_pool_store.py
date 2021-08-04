@@ -3,7 +3,7 @@ from typing import List, Tuple, Dict, Optional
 
 import aiosqlite
 
-from chia.types.coin_spend import CoinSpend
+from chia.types.coin_solution import CoinSolution
 from chia.util.db_wrapper import DBWrapper
 from chia.util.ints import uint32
 
@@ -11,37 +11,38 @@ log = logging.getLogger(__name__)
 
 
 class WalletPoolStore:
-    db_connection: aiosqlite.Connection
+    db_connection: Dict[str, aiosqlite.Connection]
     db_wrapper: DBWrapper
-    _state_transitions_cache: Dict[int, List[Tuple[uint32, CoinSpend]]]
+    _state_transitions_cache: Dict[int, List[Tuple[uint32, CoinSolution]]]
 
     @classmethod
-    async def create(cls, wrapper: DBWrapper):
+    async def create(cls, wrapper: DBWrapper, db="chia"):
         self = cls()
 
         self.db_connection = wrapper.db
         self.db_wrapper = wrapper
-        await self.db_connection.execute("pragma journal_mode=wal")
-        await self.db_connection.execute("pragma synchronous=2")
+        await self.db_connection[db].execute("pragma journal_mode=wal")
+        await self.db_connection[db].execute("pragma synchronous=2")
 
-        await self.db_connection.execute(
+        await self.db_connection[db].execute(
             "CREATE TABLE IF NOT EXISTS pool_state_transitions(transition_index integer, wallet_id integer, "
             "height bigint, coin_spend blob, PRIMARY KEY(transition_index, wallet_id))"
         )
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
         await self.rebuild_cache()
         return self
 
-    async def _clear_database(self):
-        cursor = await self.db_connection.execute("DELETE FROM interested_coins")
+    async def _clear_database(self, db="chia"):
+        cursor = await self.db_connection[db].execute("DELETE FROM interested_coins")
         await cursor.close()
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
 
     async def add_spend(
         self,
         wallet_id: int,
-        spend: CoinSpend,
+        spend: CoinSolution,
         height: uint32,
+        db="chia"
     ) -> None:
         """
         Appends (or replaces) entries in the DB. The new list must be at least as long as the existing list, and the
@@ -51,7 +52,7 @@ class WalletPoolStore:
         """
         if wallet_id not in self._state_transitions_cache:
             self._state_transitions_cache[wallet_id] = []
-        all_state_transitions: List[Tuple[uint32, CoinSpend]] = self.get_spends_for_wallet(wallet_id)
+        all_state_transitions: List[Tuple[uint32, CoinSolution]] = self.get_spends_for_wallet(wallet_id)
 
         if (height, spend) in all_state_transitions:
             return
@@ -64,7 +65,7 @@ class WalletPoolStore:
 
         all_state_transitions.append((height, spend))
 
-        cursor = await self.db_connection.execute(
+        cursor = await self.db_connection[db].execute(
             "INSERT OR REPLACE INTO pool_state_transitions VALUES (?, ?, ?, ?)",
             (
                 len(all_state_transitions) - 1,
@@ -75,29 +76,29 @@ class WalletPoolStore:
         )
         await cursor.close()
 
-    def get_spends_for_wallet(self, wallet_id: int) -> List[Tuple[uint32, CoinSpend]]:
+    def get_spends_for_wallet(self, wallet_id: int) -> List[Tuple[uint32, CoinSolution]]:
         """
         Retrieves all entries for a wallet ID from the cache, works even if commit is not called yet.
         """
         return self._state_transitions_cache.get(wallet_id, [])
 
-    async def rebuild_cache(self) -> None:
+    async def rebuild_cache(self, db="chia") -> None:
         """
         This resets the cache, and loads all entries from the DB. Any entries in the cache that were not committed
         are removed. This can happen if a state transition in wallet_blockchain fails.
         """
-        cursor = await self.db_connection.execute("SELECT * FROM pool_state_transitions ORDER BY transition_index")
+        cursor = await self.db_connection[db].execute("SELECT * FROM pool_state_transitions ORDER BY transition_index")
         rows = await cursor.fetchall()
         await cursor.close()
         self._state_transitions_cache = {}
         for row in rows:
-            _, wallet_id, height, coin_spend_bytes = row
-            coin_spend: CoinSpend = CoinSpend.from_bytes(coin_spend_bytes)
+            _, wallet_id, height, coin_solution_bytes = row
+            coin_solution: CoinSolution = CoinSolution.from_bytes(coin_solution_bytes)
             if wallet_id not in self._state_transitions_cache:
                 self._state_transitions_cache[wallet_id] = []
-            self._state_transitions_cache[wallet_id].append((height, coin_spend))
+            self._state_transitions_cache[wallet_id].append((height, coin_solution))
 
-    async def rollback(self, height: int, wallet_id_arg: int) -> None:
+    async def rollback(self, height: int, wallet_id_arg: int, db="chia") -> None:
         """
         Rollback removes all entries which have entry_height > height passed in. Note that this is not committed to the
         DB until db_wrapper.commit() is called. However it is written to the cache, so it can be fetched with
@@ -111,7 +112,7 @@ class WalletPoolStore:
                     break
             if remove_index_start is not None:
                 del items[remove_index_start:]
-        cursor = await self.db_connection.execute(
+        cursor = await self.db_connection[db].execute(
             "DELETE FROM pool_state_transitions WHERE height>? AND wallet_id=?", (height, wallet_id_arg)
         )
         await cursor.close()

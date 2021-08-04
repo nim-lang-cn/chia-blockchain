@@ -31,7 +31,7 @@ class AddressManagerStore:
     be deduced and it is not explicitly stored, instead it is recalculated.
     """
 
-    db: aiosqlite.Connection
+    db:Dict[str, aiosqlite.Connection]
 
     @classmethod
     async def create(cls, connection) -> "AddressManagerStore":

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import aiosqlite
 
@@ -14,17 +14,17 @@ class WalletActionStore:
     Used by Colored coins, Atomic swaps, Rate Limited, and Authorized payee wallets
     """
 
-    db_connection: aiosqlite.Connection
+    db_connection: Dict[str, aiosqlite.Connection]
     cache_size: uint32
     db_wrapper: DBWrapper
 
     @classmethod
-    async def create(cls, db_wrapper: DBWrapper):
+    async def create(cls, db_wrapper: DBWrapper, db="chia"):
         self = cls()
         self.db_wrapper = db_wrapper
         self.db_connection = db_wrapper.db
 
-        await self.db_connection.execute(
+        await self.db_connection[db].execute(
             (
                 "CREATE TABLE IF NOT EXISTS action_queue("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -37,26 +37,26 @@ class WalletActionStore:
             )
         )
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS name on action_queue(name)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS name on action_queue(name)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS wallet_id on action_queue(wallet_id)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS wallet_id on action_queue(wallet_id)")
 
-        await self.db_connection.execute("CREATE INDEX IF NOT EXISTS wallet_type on action_queue(wallet_type)")
+        await self.db_connection[db].execute("CREATE INDEX IF NOT EXISTS wallet_type on action_queue(wallet_type)")
 
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
         return self
 
-    async def _clear_database(self):
-        cursor = await self.db_connection.execute("DELETE FROM action_queue")
+    async def _clear_database(self, db="chia"):
+        cursor = await self.db_connection[db].execute("DELETE FROM action_queue")
         await cursor.close()
-        await self.db_connection.commit()
+        await self.db_connection[db].commit()
 
-    async def get_wallet_action(self, id: int) -> Optional[WalletAction]:
+    async def get_wallet_action(self, id: int, db="chia") -> Optional[WalletAction]:
         """
         Return a wallet action by id
         """
 
-        cursor = await self.db_connection.execute("SELECT * from action_queue WHERE id=?", (id,))
+        cursor = await self.db_connection[db].execute("SELECT * from action_queue WHERE id=?", (id,))
         row = await cursor.fetchone()
         await cursor.close()
 
@@ -66,7 +66,7 @@ class WalletActionStore:
         return WalletAction(row[0], row[1], row[2], WalletType(row[3]), row[4], bool(row[5]), row[6])
 
     async def create_action(
-        self, name: str, wallet_id: int, type: int, callback: str, done: bool, data: str, in_transaction: bool
+        self, name: str, wallet_id: int, type: int, callback: str, done: bool, data: str, in_transaction: bool, db="chia"
     ):
         """
         Creates Wallet Action
@@ -74,24 +74,24 @@ class WalletActionStore:
         if not in_transaction:
             await self.db_wrapper.lock.acquire()
         try:
-            cursor = await self.db_connection.execute(
+            cursor = await self.db_connection[db].execute(
                 "INSERT INTO action_queue VALUES(?, ?, ?, ?, ?, ?, ?)",
                 (None, name, wallet_id, type, callback, done, data),
             )
             await cursor.close()
         finally:
             if not in_transaction:
-                await self.db_connection.commit()
+                await self.db_connection[db].commit()
                 self.db_wrapper.lock.release()
 
-    async def action_done(self, action_id: int):
+    async def action_done(self, action_id: int, db="chia"):
         """
         Marks action as done
         """
         action: Optional[WalletAction] = await self.get_wallet_action(action_id)
         assert action is not None
         async with self.db_wrapper.lock:
-            cursor = await self.db_connection.execute(
+            cursor = await self.db_connection[db].execute(
                 "Replace INTO action_queue VALUES(?, ?, ?, ?, ?, ?, ?)",
                 (
                     action.id,
@@ -105,14 +105,14 @@ class WalletActionStore:
             )
 
             await cursor.close()
-            await self.db_connection.commit()
+            await self.db_connection[db].commit()
 
-    async def get_all_pending_actions(self) -> List[WalletAction]:
+    async def get_all_pending_actions(self, db="chia") -> List[WalletAction]:
         """
         Returns list of all pending action
         """
         result: List[WalletAction] = []
-        cursor = await self.db_connection.execute("SELECT * from action_queue WHERE done=?", (0,))
+        cursor = await self.db_connection[db].execute("SELECT * from action_queue WHERE done=?", (0,))
         rows = await cursor.fetchall()
         await cursor.close()
 
@@ -125,12 +125,12 @@ class WalletActionStore:
 
         return result
 
-    async def get_action_by_id(self, id) -> Optional[WalletAction]:
+    async def get_action_by_id(self, id, db="chia") -> Optional[WalletAction]:
         """
         Return a wallet action by id
         """
 
-        cursor = await self.db_connection.execute("SELECT * from action_queue WHERE id=?", (id,))
+        cursor = await self.db_connection[db].execute("SELECT * from action_queue WHERE id=?", (id,))
         row = await cursor.fetchone()
         await cursor.close()
 
