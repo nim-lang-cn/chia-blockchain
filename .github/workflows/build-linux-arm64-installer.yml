@@ -25,7 +25,7 @@ jobs:
     steps:
     - name: Cancel previous runs on the same branch
       if: ${{ github.ref != 'refs/heads/main' }}
-      uses: styfle/cancel-workflow-action@0.9.0
+      uses: styfle/cancel-workflow-action@0.9.1
       with:
         access_token: ${{ github.token }}
 
@@ -34,6 +34,10 @@ jobs:
       with:
         fetch-depth: 0
         submodules: recursive
+
+    - name: Cleanup any leftovers that exist from previous runs
+      run: bash build_scripts/clean-runner.sh || true
+
     # Create our own venv outside of the git directory JUST for getting the ACTUAL version so that install can't break it
     - name: Create installer version number
       id: version_number
