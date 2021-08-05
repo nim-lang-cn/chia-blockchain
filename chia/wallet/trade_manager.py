@@ -11,7 +11,7 @@ from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.spend_bundle import SpendBundle
-from chia.types.coin_solution import CoinSolution
+from chia.types.coin_spend import CoinSpend
 from chia.util.byte_types import hexstr_to_bytes
 from chia.util.db_wrapper import DBWrapper
 from chia.util.hash import std_hash
@@ -360,8 +360,8 @@ class TradeManager:
         if trade_offer is not None:
             offer_spend_bundle: SpendBundle = trade_offer.spend_bundle
 
-        coinsols: List[CoinSolution] = []  # [] of CoinSolutions
-        cc_coinsol_outamounts: Dict[bytes32, List[Tuple[CoinSolution, int]]] = dict()
+        coinsols: List[CoinSpend] = []  # [] of CoinSolutions
+        cc_coinsol_outamounts: Dict[bytes32, List[Tuple[CoinSpend, int]]] = dict()
         aggsig = offer_spend_bundle.aggregated_signature
         cc_discrepancies: Dict[bytes32, int] = dict()
         chia_discrepancy = None

@@ -15,7 +15,7 @@ from chia.protocols.wallet_protocol import PuzzleSolutionResponse
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.types.coin_solution import CoinSolution
+from chia.types.coin_spend import CoinSpend
 from chia.types.generator_types import BlockGenerator
 from chia.types.spend_bundle import SpendBundle
 from chia.util.byte_types import hexstr_to_bytes
@@ -741,7 +741,7 @@ class CCWallet:
                 None,
                 None,
             ]
-            list_of_solutions.append(CoinSolution(coin, puzzle_reveal, Program.to(solution)))
+            list_of_solutions.append(CoinSpend(coin, puzzle_reveal, Program.to(solution)))
 
         aggsig = AugSchemeMPL.aggregate(sigs)
         return SpendBundle(list_of_solutions, aggsig)

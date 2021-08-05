@@ -3,7 +3,7 @@ from typing import List, Tuple, Dict, Optional
 
 import aiosqlite
 
-from chia.types.coin_solution import CoinSolution
+from chia.types.coin_spend import CoinSpend
 from chia.util.db_wrapper import DBWrapper
 from chia.util.ints import uint32
 
@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 class WalletPoolStore:
     db_connection: Dict[str, aiosqlite.Connection]
     db_wrapper: DBWrapper
-    _state_transitions_cache: Dict[int, List[Tuple[uint32, CoinSolution]]]
+    _state_transitions_cache: Dict[int, List[Tuple[uint32, CoinSpend]]]
 
     @classmethod
     async def create(cls, wrapper: DBWrapper, db="chia"):
@@ -40,7 +40,7 @@ class WalletPoolStore:
     async def add_spend(
         self,
         wallet_id: int,
-        spend: CoinSolution,
+        spend: CoinSpend,
         height: uint32,
         db="chia"
     ) -> None:
@@ -52,7 +52,7 @@ class WalletPoolStore:
         """
         if wallet_id not in self._state_transitions_cache:
             self._state_transitions_cache[wallet_id] = []
-        all_state_transitions: List[Tuple[uint32, CoinSolution]] = self.get_spends_for_wallet(wallet_id)
+        all_state_transitions: List[Tuple[uint32, CoinSpend]] = self.get_spends_for_wallet(wallet_id)
 
         if (height, spend) in all_state_transitions:
             return
@@ -76,7 +76,7 @@ class WalletPoolStore:
         )
         await cursor.close()
 
-    def get_spends_for_wallet(self, wallet_id: int) -> List[Tuple[uint32, CoinSolution]]:
+    def get_spends_for_wallet(self, wallet_id: int) -> List[Tuple[uint32, CoinSpend]]:
         """
         Retrieves all entries for a wallet ID from the cache, works even if commit is not called yet.
         """
@@ -93,7 +93,7 @@ class WalletPoolStore:
         self._state_transitions_cache = {}
         for row in rows:
             _, wallet_id, height, coin_solution_bytes = row
-            coin_solution: CoinSolution = CoinSolution.from_bytes(coin_solution_bytes)
+            coin_solution: CoinSpend = CoinSpend.from_bytes(coin_solution_bytes)
             if wallet_id not in self._state_transitions_cache:
                 self._state_transitions_cache[wallet_id] = []
             self._state_transitions_cache[wallet_id].append((height, coin_solution))

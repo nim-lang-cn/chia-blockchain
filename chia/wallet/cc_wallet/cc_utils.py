@@ -7,7 +7,7 @@ from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program, INFINITE_COST
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.condition_opcodes import ConditionOpcode
-from chia.types.spend_bundle import CoinSolution, SpendBundle
+from chia.types.spend_bundle import CoinSpend, SpendBundle
 from chia.util.condition_tools import conditions_dict_for_solution
 from chia.util.ints import uint64
 from chia.wallet.puzzles.cc_loader import CC_MOD, LOCK_INNER_PUZZLE
@@ -85,10 +85,10 @@ def coin_solution_for_lock_coin(
     prev_coin: Coin,
     subtotal: int,
     coin: Coin,
-) -> CoinSolution:
+) -> CoinSpend:
     puzzle_reveal = LOCK_INNER_PUZZLE.curry(prev_coin.as_list(), subtotal)
     coin = Coin(coin.name(), puzzle_reveal.get_tree_hash(), uint64(0))
-    coin_solution = CoinSolution(coin, puzzle_reveal, Program.to(0))
+    coin_solution = CoinSpend(coin, puzzle_reveal, Program.to(0))
     return coin_solution
 
 
@@ -157,7 +157,7 @@ def spend_bundle_for_spendable_ccs(
             next_bundle,
             subtotals[index],
         ]
-        coin_solution = CoinSolution(input_coins[index], puzzle_reveal, Program.to(solution))
+        coin_solution = CoinSpend(input_coins[index], puzzle_reveal, Program.to(solution))
         coin_solutions.append(coin_solution)
 
     if sigs is None or sigs == []:
@@ -210,10 +210,10 @@ def get_lineage_proof_from_coin_and_puz(parent_coin, parent_puzzle):
     return lineage_proof
 
 
-def spendable_cc_list_from_coin_solution(coin_solution: CoinSolution, hash_to_puzzle_f) -> List[SpendableCC]:
+def spendable_cc_list_from_coin_solution(coin_solution: CoinSpend, hash_to_puzzle_f) -> List[SpendableCC]:
 
     """
-    Given a `CoinSolution`, extract out a list of `SpendableCC` objects.
+    Given a `CoinSpend`, extract out a list of `SpendableCC` objects.
 
     Since `SpendableCC` needs to track the inner puzzles and a `Coin` only includes
     puzzle hash, we also need a `hash_to_puzzle_f` function that turns puzzle hashes into

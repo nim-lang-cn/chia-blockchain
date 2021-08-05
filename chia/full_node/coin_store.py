@@ -29,9 +29,9 @@ class CoinStore:
         self.cache_size = cache_size
         self.db_wrapper = db_wrapper
         self.coin_record_db = db_wrapper.db
-        await self.coin_record_db.execute("pragma journal_mode=wal")
-        await self.coin_record_db.execute("pragma synchronous=2")
-        await self.coin_record_db.execute(
+        await self.coin_record_db[str].execute("pragma journal_mode=wal")
+        await self.coin_record_db[str].execute("pragma synchronous=2")
+        await self.coin_record_db[str].execute(
             (
                 "CREATE TABLE IF NOT EXISTS coin_record("
                 "coin_name text PRIMARY KEY,"
@@ -47,17 +47,17 @@ class CoinStore:
         )
 
         # Useful for reorg lookups
-        await self.coin_record_db.execute(
+        await self.coin_record_db[str].execute(
             "CREATE INDEX IF NOT EXISTS coin_confirmed_index on coin_record(confirmed_index)"
         )
 
-        await self.coin_record_db.execute("CREATE INDEX IF NOT EXISTS coin_spent_index on coin_record(spent_index)")
+        await self.coin_record_db[str].execute("CREATE INDEX IF NOT EXISTS coin_spent_index on coin_record(spent_index)")
 
-        await self.coin_record_db.execute("CREATE INDEX IF NOT EXISTS coin_spent on coin_record(spent)")
+        await self.coin_record_db[str].execute("CREATE INDEX IF NOT EXISTS coin_spent on coin_record(spent)")
 
-        await self.coin_record_db.execute("CREATE INDEX IF NOT EXISTS coin_puzzle_hash on coin_record(puzzle_hash)")
+        await self.coin_record_db[str].execute("CREATE INDEX IF NOT EXISTS coin_puzzle_hash on coin_record(puzzle_hash)")
 
-        await self.coin_record_db.commit()
+        await self.coin_record_db[str].commit()
         self.coin_record_cache = LRUCache(cache_size)
         return self
 
@@ -109,7 +109,7 @@ class CoinStore:
         cached = self.coin_record_cache.get(coin_name)
         if cached is not None:
             return cached
-        cursor = await self.coin_record_db.execute("SELECT * from coin_record WHERE coin_name=?", (coin_name.hex(),))
+        cursor = await self.coin_record_db[str].execute("SELECT * from coin_record WHERE coin_name=?", (coin_name.hex(),))
         row = await cursor.fetchone()
         await cursor.close()
         if row is not None:
@@ -120,7 +120,7 @@ class CoinStore:
         return None
 
     async def get_coins_added_at_height(self, height: uint32) -> List[CoinRecord]:
-        cursor = await self.coin_record_db.execute("SELECT * from coin_record WHERE confirmed_index=?", (height,))
+        cursor = await self.coin_record_db[str].execute("SELECT * from coin_record WHERE confirmed_index=?", (height,))
         rows = await cursor.fetchall()
         await cursor.close()
         coins = []
@@ -130,7 +130,7 @@ class CoinStore:
         return coins
 
     async def get_coins_removed_at_height(self, height: uint32) -> List[CoinRecord]:
-        cursor = await self.coin_record_db.execute("SELECT * from coin_record WHERE spent_index=?", (height,))
+        cursor = await self.coin_record_db[str].execute("SELECT * from coin_record WHERE spent_index=?", (height,))
         rows = await cursor.fetchall()
         await cursor.close()
         coins = []
@@ -152,7 +152,7 @@ class CoinStore:
     ) -> List[CoinRecord]:
 
         coins = set()
-        cursor = await self.coin_record_db.execute(
+        cursor = await self.coin_record_db[str].execute(
             f"SELECT * from coin_record WHERE puzzle_hash=? AND confirmed_index>=? AND confirmed_index<? "
             f"{'' if include_spent_coins else 'AND spent=0'}",
             (puzzle_hash.hex(), start_height, end_height),
@@ -177,7 +177,7 @@ class CoinStore:
 
         coins = set()
         puzzle_hashes_db = tuple([ph.hex() for ph in puzzle_hashes])
-        cursor = await self.coin_record_db.execute(
+        cursor = await self.coin_record_db[str].execute(
             f'SELECT * from coin_record WHERE puzzle_hash in ({"?," * (len(puzzle_hashes_db) - 1)}?) '
             f"AND confirmed_index>=? AND confirmed_index<? "
             f"{'' if include_spent_coins else 'AND spent=0'}",
@@ -204,7 +204,7 @@ class CoinStore:
 
         coins = set()
         parent_ids_db = tuple([pid.hex() for pid in parent_ids])
-        cursor = await self.coin_record_db.execute(
+        cursor = await self.coin_record_db[str].execute(
             f'SELECT * from coin_record WHERE coin_parent in ({"?," * (len(parent_ids_db) - 1)}?) '
             f"AND confirmed_index>=? AND confirmed_index<? "
             f"{'' if include_spent_coins else 'AND spent=0'}",
@@ -243,9 +243,9 @@ class CoinStore:
             self.coin_record_cache.remove(coin_name)
 
         # Delete from storage
-        c1 = await self.coin_record_db.execute("DELETE FROM coin_record WHERE confirmed_index>?", (block_index,))
+        c1 = await self.coin_record_db[str].execute("DELETE FROM coin_record WHERE confirmed_index>?", (block_index,))
         await c1.close()
-        c2 = await self.coin_record_db.execute(
+        c2 = await self.coin_record_db[str].execute(
             "UPDATE coin_record SET spent_index = 0, spent = 0 WHERE spent_index>?",
             (block_index,),
         )
@@ -256,7 +256,7 @@ class CoinStore:
         if self.coin_record_cache.get(record.coin.name()) is not None:
             self.coin_record_cache.remove(record.coin.name())
 
-        cursor = await self.coin_record_db.execute(
+        cursor = await self.coin_record_db[str].execute(
             f"INSERT {'OR REPLACE ' if allow_replace else ''}INTO coin_record VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 record.coin.name().hex(),

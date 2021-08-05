@@ -91,7 +91,15 @@ class FullNodeDiscovery:
 
     async def initialize_address_manager(self) -> None:
         mkdir(self.peer_db_path.parent)
-        self.connection = await aiosqlite.connect(self.peer_db_path)
+        self.connection = dict()
+        self.connection["chia"] = await aiosqlite.connect(self.peer_db_path)
+
+        flaxPath = str(self.peer_db_path).replace(".chia",".flax")
+        self.connection["flax"] = await aiosqlite.connect(flaxPath)
+
+        gojiPath = str(self.peer_db_path).replace(".chia",".goji-blockchain")
+        self.connection["goji"] = await aiosqlite.connect(gojiPath)
+
         self.address_manager_store = await AddressManagerStore.create(self.connection)
         if not await self.address_manager_store.is_empty():
             self.address_manager = await self.address_manager_store.deserialize()
@@ -106,7 +114,7 @@ class FullNodeDiscovery:
         self.serialize_task = asyncio.create_task(self._periodically_serialize(random))
         self.cleanup_task = asyncio.create_task(self._periodically_cleanup())
 
-    async def _close_common(self) -> None:
+    async def _close_common(self,str="chia") -> None:
         self.is_closed = True
         self.cancel_task_safe(self.connect_peers_task)
         self.cancel_task_safe(self.serialize_task)
@@ -115,7 +123,7 @@ class FullNodeDiscovery:
             self.cancel_task_safe(t)
         if len(self.pending_tasks) > 0:
             await asyncio.wait(self.pending_tasks)
-        await self.connection.close()
+        await self.connection[str].close()
 
     def cancel_task_safe(self, task: Optional[asyncio.Task]):
         if task is not None:

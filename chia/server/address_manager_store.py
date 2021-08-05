@@ -31,36 +31,36 @@ class AddressManagerStore:
     be deduced and it is not explicitly stored, instead it is recalculated.
     """
 
-    db:Dict[str, aiosqlite.Connection]
+    db:Dict[str, aiosqlite.Connection] = dict()
 
     @classmethod
-    async def create(cls, connection) -> "AddressManagerStore":
+    async def create(cls, connection, str="chia") -> "AddressManagerStore":
         self = cls()
         self.db = connection
-        await self.db.commit()
-        await self.db.execute("pragma journal_mode=wal")
-        await self.db.execute("pragma synchronous=2")
-        await self.db.execute("CREATE TABLE IF NOT EXISTS peer_metadata(key text,value text)")
-        await self.db.commit()
+        await self.db[str].commit()
+        await self.db[str].execute("pragma journal_mode=wal")
+        await self.db[str].execute("pragma synchronous=2")
+        await self.db[str].execute("CREATE TABLE IF NOT EXISTS peer_metadata(key text,value text)")
+        await self.db[str].commit()
 
-        await self.db.execute("CREATE TABLE IF NOT EXISTS peer_nodes(node_id int,value text)")
-        await self.db.commit()
+        await self.db[str].execute("CREATE TABLE IF NOT EXISTS peer_nodes(node_id int,value text)")
+        await self.db[str].commit()
 
-        await self.db.execute("CREATE TABLE IF NOT EXISTS peer_new_table(node_id int,bucket int)")
-        await self.db.commit()
+        await self.db[str].execute("CREATE TABLE IF NOT EXISTS peer_new_table(node_id int,bucket int)")
+        await self.db[str].commit()
         return self
 
-    async def clear(self) -> None:
-        cursor = await self.db.execute("DELETE from peer_metadata")
+    async def clear(self, str="chia") -> None:
+        cursor = await self.db[str].execute("DELETE from peer_metadata")
         await cursor.close()
-        cursor = await self.db.execute("DELETE from peer_nodes")
+        cursor = await self.db[str].execute("DELETE from peer_nodes")
         await cursor.close()
-        cursor = await self.db.execute("DELETE from peer_new_table")
+        cursor = await self.db[str].execute("DELETE from peer_new_table")
         await cursor.close()
-        await self.db.commit()
+        await self.db[str].commit()
 
-    async def get_metadata(self) -> Dict[str, str]:
-        cursor = await self.db.execute("SELECT key, value from peer_metadata")
+    async def get_metadata(self, str="chia") -> Dict[str, str]:
+        cursor = await self.db[str].execute("SELECT key, value from peer_metadata")
         metadata = await cursor.fetchall()
         await cursor.close()
         return {key: value for key, value in metadata}
@@ -75,44 +75,44 @@ class AddressManagerStore:
             return False
         return True
 
-    async def get_nodes(self) -> List[Tuple[int, ExtendedPeerInfo]]:
-        cursor = await self.db.execute("SELECT node_id, value from peer_nodes")
+    async def get_nodes(self, str="chia") -> List[Tuple[int, ExtendedPeerInfo]]:
+        cursor = await self.db[str].execute("SELECT node_id, value from peer_nodes")
         nodes_id = await cursor.fetchall()
         await cursor.close()
         return [(node_id, ExtendedPeerInfo.from_string(info_str)) for node_id, info_str in nodes_id]
 
-    async def get_new_table(self) -> List[Tuple[int, int]]:
-        cursor = await self.db.execute("SELECT node_id, bucket from peer_new_table")
+    async def get_new_table(self, str="chia") -> List[Tuple[int, int]]:
+        cursor = await self.db[str].execute("SELECT node_id, bucket from peer_new_table")
         entries = await cursor.fetchall()
         await cursor.close()
         return [(node_id, bucket) for node_id, bucket in entries]
 
-    async def set_metadata(self, metadata) -> None:
+    async def set_metadata(self, metadata, str="chia") -> None:
         for key, value in metadata:
-            cursor = await self.db.execute(
+            cursor = await self.db[str].execute(
                 "INSERT OR REPLACE INTO peer_metadata VALUES(?, ?)",
                 (key, value),
             )
             await cursor.close()
-        await self.db.commit()
+        await self.db[str].commit()
 
-    async def set_nodes(self, node_list) -> None:
+    async def set_nodes(self, node_list, str="chia") -> None:
         for node_id, peer_info in node_list:
-            cursor = await self.db.execute(
+            cursor = await self.db[str].execute(
                 "INSERT OR REPLACE INTO peer_nodes VALUES(?, ?)",
                 (node_id, peer_info.to_string()),
             )
             await cursor.close()
-        await self.db.commit()
+        await self.db[str].commit()
 
-    async def set_new_table(self, entries) -> None:
+    async def set_new_table(self, entries, str="chia") -> None:
         for node_id, bucket in entries:
-            cursor = await self.db.execute(
+            cursor = await self.db[str].execute(
                 "INSERT OR REPLACE INTO peer_new_table VALUES(?, ?)",
                 (node_id, bucket),
             )
             await cursor.close()
-        await self.db.commit()
+        await self.db[str].commit()
 
     async def serialize(self, address_manager: AddressManager):
         metadata = []

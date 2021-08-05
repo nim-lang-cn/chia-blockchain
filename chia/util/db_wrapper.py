@@ -15,6 +15,7 @@ class DBWrapper:
     lock: asyncio.Lock
 
     def __init__(self, connection: Dict[str,aiosqlite.Connection]):
+        self.db = dict()
         self.db = connection
         self.lock = asyncio.Lock()
 
@@ -29,4 +30,5 @@ class DBWrapper:
             await cursor.close()
 
     async def commit_transaction(self,str="chia"):
-        await self.db[str].commit()
+        if isinstance(self.db[str], aiosqlite.Connection):
+            await self.db[str].commit()

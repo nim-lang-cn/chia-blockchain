@@ -66,7 +66,7 @@ class FullNode:
     sync_store: Any
     coin_store: CoinStore
     mempool_manager: MempoolManager
-    connection:Dict[str, aiosqlite.Connection]
+    connection: Dict[str, aiosqlite.Connection] = dict()
     _sync_task: Optional[asyncio.Task]
     _init_weight_proof: Optional[asyncio.Task] = None
     blockchain: Blockchain
@@ -119,7 +119,13 @@ class FullNode:
         self.compact_vdf_sem = asyncio.Semaphore(4)
         self.new_peak_sem = asyncio.Semaphore(8)
         # create the store (db) and full node instance
-        self.connection = await aiosqlite.connect(self.db_path)
+        self.connection["chia"] = await aiosqlite.connect(self.db_path)
+        flaxPath = str(self.db_path).replace(".chia",".flax")
+        self.connection["flax"] = await aiosqlite.connect(flaxPath)
+
+        gojiPath = str(self.db_path).replace(".chia",".goji-blockchain")
+        self.connection["goji"] = await aiosqlite.connect(gojiPath)
+
         self.db_wrapper = DBWrapper(self.connection)
         self.block_store = await BlockStore.create(self.db_wrapper)
         self.sync_store = await SyncStore.create()
@@ -567,11 +573,11 @@ class FullNode:
         if self.uncompact_task is not None:
             self.uncompact_task.cancel()
 
-    async def _await_closed(self):
+    async def _await_closed(self, str="chia"):
         cancel_task_safe(self._sync_task, self.log)
         for task_id, task in list(self.full_node_store.tx_fetch_tasks.items()):
             cancel_task_safe(task, self.log)
-        await self.connection.close()
+        await self.connection[str].close()
         if self._init_weight_proof is not None:
             await asyncio.wait([self._init_weight_proof])
 
