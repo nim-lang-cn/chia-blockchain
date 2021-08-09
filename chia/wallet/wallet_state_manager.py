@@ -1058,8 +1058,8 @@ class WalletStateManager:
     def unlink_db(self):
         Path(self.db_path).unlink()
 
-    async def get_all_wallet_info_entries(self) -> List[WalletInfo]:
-        return await self.user_store.get_all_wallet_info_entries()
+    async def get_all_wallet_info_entries(self,str="chia") -> List[WalletInfo]:
+        return await self.user_store.get_all_wallet_info_entries(str)
 
     async def get_start_height(self):
         """

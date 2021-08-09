@@ -23,7 +23,7 @@ class CoinStore:
     db_wrapper: DBWrapper
 
     @classmethod
-    async def create(cls, db_wrapper: DBWrapper, cache_size: uint32 = uint32(60000)):
+    async def create(cls, db_wrapper: DBWrapper, cache_size: uint32 = uint32(60000), str="chia"):
         self = cls()
 
         self.cache_size = cache_size
@@ -105,7 +105,7 @@ class CoinStore:
         assert sum([a.amount for a in tx_additions]) <= total_amount_spent
 
     # Checks DB and DiffStores for CoinRecord with coin_name and returns it
-    async def get_coin_record(self, coin_name: bytes32) -> Optional[CoinRecord]:
+    async def get_coin_record(self, coin_name: bytes32,str="chia") -> Optional[CoinRecord]:
         cached = self.coin_record_cache.get(coin_name)
         if cached is not None:
             return cached
@@ -119,7 +119,7 @@ class CoinStore:
             return record
         return None
 
-    async def get_coins_added_at_height(self, height: uint32) -> List[CoinRecord]:
+    async def get_coins_added_at_height(self, height: uint32,str="chia") -> List[CoinRecord]:
         cursor = await self.coin_record_db[str].execute("SELECT * from coin_record WHERE confirmed_index=?", (height,))
         rows = await cursor.fetchall()
         await cursor.close()
@@ -129,7 +129,7 @@ class CoinStore:
             coins.append(CoinRecord(coin, row[1], row[2], row[3], row[4], row[8]))
         return coins
 
-    async def get_coins_removed_at_height(self, height: uint32) -> List[CoinRecord]:
+    async def get_coins_removed_at_height(self, height: uint32,str="chia") -> List[CoinRecord]:
         cursor = await self.coin_record_db[str].execute("SELECT * from coin_record WHERE spent_index=?", (height,))
         rows = await cursor.fetchall()
         await cursor.close()
@@ -149,10 +149,11 @@ class CoinStore:
         puzzle_hash: bytes32,
         start_height: uint32 = uint32(0),
         end_height: uint32 = uint32((2 ** 32) - 1),
+        str="chia"
     ) -> List[CoinRecord]:
 
         coins = set()
-        cursor = await self.coin_record_db.execute(
+        cursor = await self.coin_record_db[str].execute(
             f"SELECT * from coin_record INDEXED BY coin_puzzle_hash WHERE puzzle_hash=? "
             f"AND confirmed_index>=? AND confirmed_index<? "
             f"{'' if include_spent_coins else 'AND spent=0'}",
@@ -172,13 +173,14 @@ class CoinStore:
         puzzle_hashes: List[bytes32],
         start_height: uint32 = uint32(0),
         end_height: uint32 = uint32((2 ** 32) - 1),
+        str="chia"
     ) -> List[CoinRecord]:
         if len(puzzle_hashes) == 0:
             return []
 
         coins = set()
         puzzle_hashes_db = tuple([ph.hex() for ph in puzzle_hashes])
-        cursor = await self.coin_record_db.execute(
+        cursor = await self.coin_record_db[str].execute(
             f"SELECT * from coin_record INDEXED BY coin_puzzle_hash "
             f'WHERE puzzle_hash in ({"?," * (len(puzzle_hashes_db) - 1)}?) '
             f"AND confirmed_index>=? AND confirmed_index<? "
@@ -200,6 +202,7 @@ class CoinStore:
         parent_ids: List[bytes32],
         start_height: uint32 = uint32(0),
         end_height: uint32 = uint32((2 ** 32) - 1),
+        str="chia"
     ) -> List[CoinRecord]:
         if len(parent_ids) == 0:
             return []
@@ -221,7 +224,7 @@ class CoinStore:
             coins.add(CoinRecord(coin, row[1], row[2], row[3], row[4], row[8]))
         return list(coins)
 
-    async def rollback_to_block(self, block_index: int):
+    async def rollback_to_block(self, block_index: int,str="chia"):
         """
         Note that block_index can be negative, in which case everything is rolled back
         """
@@ -254,11 +257,11 @@ class CoinStore:
         await c2.close()
 
     # Store CoinRecord in DB and ram cache
-    async def _add_coin_record(self, record: CoinRecord, allow_replace: bool) -> None:
+    async def _add_coin_record(self, record: CoinRecord, allow_replace: bool,db="chia") -> None:
         if self.coin_record_cache.get(record.coin.name()) is not None:
             self.coin_record_cache.remove(record.coin.name())
 
-        cursor = await self.coin_record_db[str].execute(
+        cursor = await self.coin_record_db[db].execute(
             f"INSERT {'OR REPLACE ' if allow_replace else ''}INTO coin_record VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 record.coin.name().hex(),

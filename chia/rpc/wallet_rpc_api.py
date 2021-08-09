@@ -418,7 +418,10 @@ class WalletRpcApi:
         assert self.service.wallet_state_manager is not None
 
         wallets: List[WalletInfo] = await self.service.wallet_state_manager.get_all_wallet_info_entries()
+        wallets.append(await self.service.wallet_state_manager.get_all_wallet_info_entries("flax"))
+        wallets.append(await self.service.wallet_state_manager.get_all_wallet_info_entries("goji"))
 
+        log.warning(wallets)
         return {"wallets": wallets}
 
     async def _create_backup_and_upload(self, host) -> None:
@@ -660,7 +663,7 @@ class WalletRpcApi:
 
     async def get_transactions(self, request: Dict) -> Dict:
         assert self.service.wallet_state_manager is not None
-
+        log.warning(request)
         wallet_id = int(request["wallet_id"])
         if "start" in request:
             start = request["start"]

@@ -337,7 +337,7 @@ class BlockStore:
         )
         await cursor_2.close()
 
-    async def is_fully_compactified(self, header_hash: bytes32) -> Optional[bool]:
+    async def is_fully_compactified(self, header_hash: bytes32,str="chia") -> Optional[bool]:
         cursor = await self.db[str].execute(
             "SELECT is_fully_compactified from full_blocks WHERE header_hash=?", (header_hash.hex(),)
         )
