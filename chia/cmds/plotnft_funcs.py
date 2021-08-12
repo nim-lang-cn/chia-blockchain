@@ -104,6 +104,7 @@ async def create(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -
 
 async def pprint_pool_wallet_state(
     wallet_client: WalletRpcClient,
+    wallet_name: str,
     wallet_id: int,
     pool_wallet_info: PoolWalletInfo,
     address_prefix: str,
@@ -132,7 +133,7 @@ async def pprint_pool_wallet_state(
         print(f"Target state: {PoolSingletonState(pool_wallet_info.target.state).name}")
         print(f"Target pool URL: {pool_wallet_info.target.pool_url}")
     if pool_wallet_info.current.state == PoolSingletonState.SELF_POOLING.value:
-        balances: Dict = await wallet_client.get_wallet_balance(str(wallet_id))
+        balances: Dict = await wallet_client.get_wallet_balance(wallet_name, wallet_id)
         balance = balances["confirmed_wallet_balance"]
         typ = WalletType(int(WalletType.POOLING_WALLET))
         address_prefix, scale = wallet_coin_unit(typ, address_prefix)
@@ -213,12 +214,14 @@ async def show(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> 
         print(f"Sync status: {'Synced' if (await wallet_client.get_synced()) else 'Not synced'}")
         for summary in summaries_response:
             wallet_id = summary["id"]
+            wallet_name = summary["name"]
             typ = WalletType(int(summary["type"]))
             if typ == WalletType.POOLING_WALLET:
                 print(f"Wallet id {wallet_id}: ")
                 pool_wallet_info, _ = await wallet_client.pw_status(wallet_id)
                 await pprint_pool_wallet_state(
                     wallet_client,
+                    wallet_name,
                     wallet_id,
                     pool_wallet_info,
                     address_prefix,

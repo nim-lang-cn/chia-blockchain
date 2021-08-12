@@ -77,6 +77,7 @@ class RpcServer:
     def _wrap_http_handler(self, f) -> Callable:
         async def inner(request) -> aiohttp.web.Response:
             request_data = await request.json()
+            log.warning(request_data)
             try:
                 res_object = await f(request_data)
                 if res_object is None:

@@ -103,7 +103,9 @@ class WalletStateManager:
     db_wrapper: DBWrapper
 
     main_wallet: Wallet
-    wallets: Dict[uint32, Any]
+    flax_wallet: Wallet
+    goji_wallet: Wallet
+    wallets: Dict[str,Dict[uint32, Any]]
     private_key: PrivateKey
 
     trade_manager: TradeManager
@@ -182,10 +184,21 @@ class WalletStateManager:
         main_wallet_info = await self.user_store.get_wallet_by_id(1)
         assert main_wallet_info is not None
 
+        flax_wallet_info = await self.user_store.get_wallet_by_id(1,db="flax")
+        assert flax_wallet_info is not None
+
+        goji_wallet_info = await self.user_store.get_wallet_by_id(1,db="goji")
+        assert goji_wallet_info is not None
+
         self.private_key = private_key
         self.main_wallet = await Wallet.create(self, main_wallet_info)
+        self.flax_wallet = await Wallet.create(self, flax_wallet_info)
+        self.goji_wallet = await Wallet.create(self, goji_wallet_info)
 
-        self.wallets = {main_wallet_info.id: self.main_wallet}
+        self.wallets = {main_wallet_info.name: {main_wallet_info.id: self.main_wallet},
+                        "Pool wallet":{},
+                        "flax":{flax_wallet_info.id: self.flax_wallet},
+                        "goji":{goji_wallet_info.id: self.goji_wallet}}
 
         wallet = None
         for wallet_info in await self.get_all_wallet_info_entries():
@@ -214,7 +227,7 @@ class WalletStateManager:
                     wallet_info,
                 )
             if wallet is not None:
-                self.wallets[wallet_info.id] = wallet
+                self.wallets[wallet_info.name][wallet_info.id] = wallet
 
         async with self.puzzle_store.lock:
             index = await self.puzzle_store.get_last_derivation_path()
@@ -246,7 +259,7 @@ class WalletStateManager:
                 if wallet_info.id == 1:
                     continue
                 wallet = await Wallet.create(self.config, wallet_info)
-                self.wallets[wallet_info.id] = wallet
+                self.wallets[wallet_info.name][wallet_info.id] = wallet
             # TODO add RL AND DiD WALLETS HERE
             elif wallet_info.type == WalletType.COLOURED_COIN:
                 wallet = await CCWallet.create(
@@ -254,14 +267,14 @@ class WalletStateManager:
                     self.main_wallet,
                     wallet_info,
                 )
-                self.wallets[wallet_info.id] = wallet
+                self.wallets[wallet_info.name][wallet_info.id] = wallet
             elif wallet_info.type == WalletType.DISTRIBUTED_ID:
                 wallet = await DIDWallet.create(
                     self,
                     self.main_wallet,
                     wallet_info,
                 )
-                self.wallets[wallet_info.id] = wallet
+                self.wallets[wallet_info.name][wallet_info.id] = wallet
 
     async def get_keys(self, puzzle_hash: bytes32) -> Optional[Tuple[G1Element, PrivateKey]]:
         index_for_puzzlehash = await self.puzzle_store.index_for_puzzle_hash(puzzle_hash)
@@ -276,7 +289,7 @@ class WalletStateManager:
         For all wallets in the user store, generates the first few puzzle hashes so
         that we can restore the wallet from only the private keys.
         """
-        targets = list(self.wallets.keys())
+        # targets = list(self.wallets.keys())
 
         unused: Optional[uint32] = await self.puzzle_store.get_unused_derivation_path()
         if unused is None:
@@ -291,75 +304,76 @@ class WalletStateManager:
         else:
             to_generate = self.config["initial_num_public_keys"]
 
-        for wallet_id in targets:
-            target_wallet = self.wallets[wallet_id]
+        for wallet_name in self.wallets:
+            for wallet_id in self.wallets[wallet_name]:
+                target_wallet = self.wallets[wallet_name][wallet_id]
 
-            last: Optional[uint32] = await self.puzzle_store.get_last_derivation_path_for_wallet(wallet_id)
+                last: Optional[uint32] = await self.puzzle_store.get_last_derivation_path_for_wallet(wallet_name, wallet_id)
 
-            start_index = 0
-            derivation_paths: List[DerivationRecord] = []
-
-            if last is not None:
-                start_index = last + 1
-
-            # If the key was replaced (from_zero=True), we should generate the puzzle hashes for the new key
-            if from_zero:
                 start_index = 0
+                derivation_paths: List[DerivationRecord] = []
 
-            for index in range(start_index, unused + to_generate):
-                if WalletType(target_wallet.type()) == WalletType.POOLING_WALLET:
-                    continue
-                if WalletType(target_wallet.type()) == WalletType.RATE_LIMITED:
-                    if target_wallet.rl_info.initialized is False:
+                if last is not None:
+                    start_index = last + 1
+
+                # If the key was replaced (from_zero=True), we should generate the puzzle hashes for the new key
+                if from_zero:
+                    start_index = 0
+
+                for index in range(start_index, unused + to_generate):
+                    if WalletType(target_wallet.type()) == WalletType.POOLING_WALLET:
+                        continue
+                    if WalletType(target_wallet.type()) == WalletType.RATE_LIMITED:
+                        if target_wallet.rl_info.initialized is False:
+                            break
+                        wallet_type = target_wallet.rl_info.type
+                        if wallet_type == "user":
+                            rl_pubkey = G1Element.from_bytes(target_wallet.rl_info.user_pubkey)
+                        else:
+                            rl_pubkey = G1Element.from_bytes(target_wallet.rl_info.admin_pubkey)
+                        rl_puzzle: Program = target_wallet.puzzle_for_pk(rl_pubkey)
+                        puzzle_hash: bytes32 = rl_puzzle.get_tree_hash()
+
+                        rl_index = self.get_derivation_index(rl_pubkey)
+                        if rl_index == -1:
+                            break
+
+                        derivation_paths.append(
+                            DerivationRecord(
+                                uint32(rl_index),
+                                puzzle_hash,
+                                rl_pubkey,
+                                target_wallet.type(),
+                                uint32(target_wallet.id()),
+                            )
+                        )
                         break
-                    wallet_type = target_wallet.rl_info.type
-                    if wallet_type == "user":
-                        rl_pubkey = G1Element.from_bytes(target_wallet.rl_info.user_pubkey)
-                    else:
-                        rl_pubkey = G1Element.from_bytes(target_wallet.rl_info.admin_pubkey)
-                    rl_puzzle: Program = target_wallet.puzzle_for_pk(rl_pubkey)
-                    puzzle_hash: bytes32 = rl_puzzle.get_tree_hash()
 
-                    rl_index = self.get_derivation_index(rl_pubkey)
-                    if rl_index == -1:
+                    pubkey: G1Element = self.get_public_key(uint32(index))
+                    puzzle: Program = target_wallet.puzzle_for_pk(bytes(pubkey))
+                    if puzzle is None:
+                        self.log.warning(f"Unable to create puzzles with wallet {target_wallet}")
                         break
-
+                    puzzlehash: bytes32 = puzzle.get_tree_hash()
+                    self.log.info(f"Puzzle at index {index} wallet ID {wallet_id} puzzle hash {puzzlehash.hex()}")
                     derivation_paths.append(
                         DerivationRecord(
-                            uint32(rl_index),
-                            puzzle_hash,
-                            rl_pubkey,
+                            uint32(index),
+                            puzzlehash,
+                            pubkey,
                             target_wallet.type(),
                             uint32(target_wallet.id()),
                         )
                     )
-                    break
 
-                pubkey: G1Element = self.get_public_key(uint32(index))
-                puzzle: Program = target_wallet.puzzle_for_pk(bytes(pubkey))
-                if puzzle is None:
-                    self.log.warning(f"Unable to create puzzles with wallet {target_wallet}")
-                    break
-                puzzlehash: bytes32 = puzzle.get_tree_hash()
-                self.log.info(f"Puzzle at index {index} wallet ID {wallet_id} puzzle hash {puzzlehash.hex()}")
-                derivation_paths.append(
-                    DerivationRecord(
-                        uint32(index),
-                        puzzlehash,
-                        pubkey,
-                        target_wallet.type(),
-                        uint32(target_wallet.id()),
-                    )
-                )
-
-            await self.puzzle_store.add_derivation_paths(derivation_paths, in_transaction)
+                await self.puzzle_store.add_derivation_paths(derivation_paths, in_transaction)
         if unused > 0:
             await self.puzzle_store.set_used_up_to(uint32(unused - 1), in_transaction)
 
-    async def update_wallet_puzzle_hashes(self, wallet_id):
+    async def update_wallet_puzzle_hashes(self, wallet_name, wallet_id):
         derivation_paths: List[DerivationRecord] = []
-        target_wallet = self.wallets[wallet_id]
-        last: Optional[uint32] = await self.puzzle_store.get_last_derivation_path_for_wallet(wallet_id)
+        target_wallet = self.wallets[wallet_name][wallet_id]
+        last: Optional[uint32] = await self.puzzle_store.get_last_derivation_path_for_wallet(wallet_name,wallet_id)
         unused: Optional[uint32] = await self.puzzle_store.get_unused_derivation_path()
         if unused is None:
             # This handles the case where the database has entries but they have all been used
@@ -859,7 +873,7 @@ class WalletStateManager:
         await self.coin_store.add_coin_record(coin_record)
 
         if wallet_type == WalletType.COLOURED_COIN or wallet_type == WalletType.DISTRIBUTED_ID:
-            wallet = self.wallets[wallet_id]
+            wallet = self.wallets[wallet_name][wallet_id]
             await wallet.coin_added(coin, height)
 
         return coin_record
@@ -1010,7 +1024,7 @@ class WalletStateManager:
         if coin_record is None:
             return None
         wallet_id = uint32(coin_record.wallet_id)
-        wallet = self.wallets[wallet_id]
+        wallet = self.wallets[wallet_name][wallet_id]
         return wallet
 
     async def reorg_rollback(self, height: int):
@@ -1127,7 +1141,7 @@ class WalletStateManager:
 
     async def get_wallet_for_colour(self, colour):
         for wallet_id in self.wallets:
-            wallet = self.wallets[wallet_id]
+            wallet = self.wallets[wallet_name][wallet_id]
             if wallet.type() == WalletType.COLOURED_COIN:
                 if bytes(wallet.cc_info.my_genesis_checker).hex() == colour:
                     return wallet

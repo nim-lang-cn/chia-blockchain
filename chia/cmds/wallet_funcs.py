@@ -140,7 +140,8 @@ async def print_balances(args: dict, wallet_client: WalletRpcClient, fingerprint
     print(f"Balances, fingerprint: {fingerprint}")
     for summary in summaries_response:
         wallet_id = summary["id"]
-        balances = await wallet_client.get_wallet_balance(wallet_id)
+        wallet_name = summary["name"]
+        balances = await wallet_client.get_wallet_balance(wallet_name,wallet_id)
         typ = WalletType(int(summary["type"]))
         address_prefix, scale = wallet_coin_unit(typ, address_prefix)
         print(f"Wallet ID {wallet_id} type {typ.name} {summary['name']}")

@@ -302,11 +302,16 @@ class WalletPuzzleStore:
 
         return None
 
-    async def get_last_derivation_path_for_wallet(self, wallet_id: int, db="chia") -> Optional[uint32]:
+    async def get_last_derivation_path_for_wallet(self, wallet_name:str, wallet_id: int, db="chia") -> Optional[uint32]:
         """
         Returns the last derivation path by derivation_index.
         """
-
+        if wallet_name == "Chia Wallet":
+            db = "chia"
+        elif wallet_name == "flax":
+            db = "flax"
+        elif wallet_name == "goji":
+            db = "goji"
         cursor = await self.db_connection[db].execute(
             f"SELECT MAX(derivation_index) FROM derivation_paths WHERE wallet_id={wallet_id};"
         )

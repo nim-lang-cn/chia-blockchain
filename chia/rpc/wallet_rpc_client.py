@@ -92,23 +92,24 @@ class WalletRpcClient(RpcClient):
         return (await self.fetch("get_wallets", {}))["wallets"]
 
     # Wallet APIs
-    async def get_wallet_balance(self, wallet_id: str) -> Dict:
+    async def get_wallet_balance(self, wallet_name: str, wallet_id: str) -> Dict:
         return (await self.fetch("get_wallet_balance", {"wallet_id": wallet_id}))["wallet_balance"]
 
-    async def get_transaction(self, wallet_id: str, transaction_id: bytes32) -> TransactionRecord:
+    async def get_transaction(self, wallet_name, wallet_id: str, transaction_id: bytes32) -> TransactionRecord:
         res = await self.fetch(
             "get_transaction",
-            {"walled_id": wallet_id, "transaction_id": transaction_id.hex()},
+            {"wallet_name":wallet_name, "walled_id": wallet_id, "transaction_id": transaction_id.hex()},
         )
         return TransactionRecord.from_json_dict(res["transaction"])
 
     async def get_transactions(
         self,
+        wallet_name: str,
         wallet_id: str,
     ) -> List[TransactionRecord]:
         res = await self.fetch(
             "get_transactions",
-            {"wallet_id": wallet_id},
+            {"wallet_name":wallet_name,"wallet_id": wallet_id},
         )
         reverted_tx: List[TransactionRecord] = []
         for modified_tx in res["transactions"]:
