@@ -622,6 +622,7 @@ class WalletRpcApi:
 
     async def get_wallet_balance(self, request: Dict) -> Dict:
         assert self.service.wallet_state_manager is not None
+        log.warning(request)
         wallet_id = uint32(int(request["wallet_id"]))
         wallet_name = request["wallet_name"]
         wallet = self.service.wallet_state_manager.wallets[wallet_name][wallet_id]

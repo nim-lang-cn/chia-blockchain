@@ -1047,11 +1047,12 @@ class WalletStateManager:
 
         # Removes wallets that were created from a blockchain transaction which got reorged.
         remove_ids = []
-        for wallet_id, wallet in self.wallets.items():
-            if wallet.type() == WalletType.POOLING_WALLET.value:
-                remove: bool = await wallet.rewind(height)
-                if remove:
-                    remove_ids.append(wallet_id)
+        for wallet_name, wallets in self.wallets.items():
+            for wallet_id,wallet in wallets.items():
+                if wallet.type() == WalletType.POOLING_WALLET.value:
+                    remove: bool = await wallet.rewind(height)
+                    if remove:
+                        remove_ids.append(wallet_id)
         for wallet_id in remove_ids:
             await self.user_store.delete_wallet(wallet_id, in_transaction=True)
             self.wallets.pop(wallet_id)

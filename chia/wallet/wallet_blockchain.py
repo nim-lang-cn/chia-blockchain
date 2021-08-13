@@ -243,7 +243,7 @@ class WalletBlockchain(BlockchainInterface):
                     await self.block_store.db_wrapper.commit_transaction()
                 except BaseException as e:
                     self.log.error(f"Error during db transaction: {e}")
-                    if self.block_store.db_wrapper.db._connection is not None:
+                    if self.block_store.db_wrapper.db is not None:
                         await self.block_store.db_wrapper.rollback_transaction()
                         self.remove_block_record(block_record.header_hash)
                         self.block_store.rollback_cache_block(block_record.header_hash)

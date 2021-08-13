@@ -93,7 +93,7 @@ class WalletRpcClient(RpcClient):
 
     # Wallet APIs
     async def get_wallet_balance(self, wallet_name: str, wallet_id: str) -> Dict:
-        return (await self.fetch("get_wallet_balance", {"wallet_id": wallet_id}))["wallet_balance"]
+        return (await self.fetch("get_wallet_balance", {"wallet_name":wallet_name,"wallet_id": wallet_id}))["wallet_balance"]
 
     async def get_transaction(self, wallet_name, wallet_id: str, transaction_id: bytes32) -> TransactionRecord:
         res = await self.fetch(

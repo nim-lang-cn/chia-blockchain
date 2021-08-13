@@ -212,6 +212,7 @@ class RpcServer:
         message = None
         try:
             message = json.loads(payload)
+            self.log.warn(f"Rpc call <- {message}")
             self.log.debug(f"Rpc call <- {message['command']}")
             response = await self.ws_api(message)
 

@@ -170,6 +170,7 @@ async def show(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> 
     address_prefix = config["network_overrides"]["config"][config["selected_network"]]["address_prefix"]
     summaries_response = await wallet_client.get_wallets()
     wallet_id_passed_in = args.get("id", None)
+    wallet_name_passed_in = args.get("name", None)
     plot_counts: Counter = Counter()
     try:
         pool_state_list: List = (await farmer_client.get_pool_state())["pool_state"]
@@ -203,6 +204,7 @@ async def show(args: dict, wallet_client: WalletRpcClient, fingerprint: int) -> 
         pool_wallet_info, _ = await wallet_client.pw_status(wallet_id_passed_in)
         await pprint_pool_wallet_state(
             wallet_client,
+            wallet_name_passed_in,
             wallet_id_passed_in,
             pool_wallet_info,
             address_prefix,
