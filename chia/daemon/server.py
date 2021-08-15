@@ -764,7 +764,7 @@ class WebSocketServer:
 
     async def start_service(self, request: Dict[str, Any]):
         service_command = request["service"]
-
+        wallet_name = request["wallet_name"]
         error = None
         success = False
         testing = False

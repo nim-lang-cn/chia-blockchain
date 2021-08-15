@@ -172,7 +172,7 @@ class KeychainProxy(DaemonProxy):
             if not success:
                 self.handle_error(response)
 
-    async def get_all_private_keys(self) -> List[Tuple[PrivateKey, bytes]]:
+    async def get_all_private_keys(self,request={}) -> List[Tuple[PrivateKey, bytes]]:
         """
         Forwards to Keychain.get_all_private_keys()
         """
@@ -180,7 +180,7 @@ class KeychainProxy(DaemonProxy):
         if self.use_local_keychain():
             keys = self.keychain.get_all_private_keys()
         else:
-            response, success = await self.get_response_for_request("get_all_private_keys", {})
+            response, success = await self.get_response_for_request("get_all_private_keys", request)
             if success:
                 private_keys = response["data"].get("private_keys", None)
                 if private_keys is None:

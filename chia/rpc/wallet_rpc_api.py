@@ -148,7 +148,6 @@ class WalletRpcApi:
         """
         Logs in the wallet with a specific key.
         """
-
         fingerprint = request["fingerprint"]
         if self.service.logged_in_fingerprint == fingerprint:
             return {"fingerprint": fingerprint}
@@ -200,7 +199,7 @@ class WalletRpcApi:
         try:
             assert self.service.keychain_proxy is not None  # An offering to the mypy gods
             fingerprints = [
-                sk.get_g1().get_fingerprint() for (sk, seed) in await self.service.keychain_proxy.get_all_private_keys()
+                sk.get_g1().get_fingerprint() for (sk, seed) in await self.service.keychain_proxy.get_all_private_keys(request)
             ]
         except KeyringIsLocked:
             return {"keyring_is_locked": True}
@@ -414,14 +413,12 @@ class WalletRpcApi:
     # Wallet Management
     ##########################################################################################
 
-    async def get_wallets(self, request: Dict):
+    async def get_wallets(self, request: List):
         assert self.service.wallet_state_manager is not None
-
-        chiawallets: List[WalletInfo] = await self.service.wallet_state_manager.get_all_wallet_info_entries()
-        flaxwallets = await self.service.wallet_state_manager.get_all_wallet_info_entries("flax")
-        gojiwallets = await self.service.wallet_state_manager.get_all_wallet_info_entries("goji")
-
-        wallets = chiawallets + flaxwallets + gojiwallets
+        wallets: List[WalletInfo] = []
+        for r in request:
+            log.warning(r)
+            wallets.extend(await self.service.wallet_state_manager.get_all_wallet_info_entries(r))
         return {"wallets": wallets}
 
     async def _create_backup_and_upload(self, host) -> None:

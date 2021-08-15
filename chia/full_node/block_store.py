@@ -163,13 +163,13 @@ class BlockStore:
             return row[0]
         return None
 
-    async def get_full_blocks_at(self, heights: List[uint32], str="chia") -> List[FullBlock]:
+    async def get_full_blocks_at(self, heights: List[uint32], wallet_name="chia") -> List[FullBlock]:
         if len(heights) == 0:
             return []
 
         heights_db = tuple(heights)
         formatted_str = f'SELECT block from full_blocks WHERE height in ({"?," * (len(heights_db) - 1)}?)'
-        cursor = await self.db[str].execute(formatted_str, heights_db)
+        cursor = await self.db[wallet_name].execute(formatted_str, heights_db)
         rows = await cursor.fetchall()
         await cursor.close()
         return [FullBlock.from_bytes(row[0]) for row in rows]

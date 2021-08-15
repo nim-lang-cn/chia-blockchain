@@ -23,9 +23,9 @@ if [ ! "$CHIA_INSTALLER_VERSION" ]; then
 fi
 echo "Chia Installer Version is: $CHIA_INSTALLER_VERSION"
 
-echo "Installing pnpm and electron packagers"
-pnpm install electron-packager -g
-pnpm install electron-installer-debian -g
+echo "Installing npm and electron packagers"
+npm install electron-packager -g
+npm install electron-installer-debian -g
 
 echo "Create dist/"
 rm -rf dist
@@ -45,13 +45,13 @@ cp -r dist/daemon ../chia-blockchain-gui
 cd .. || exit
 cd chia-blockchain-gui || exit
 
-echo "pnpm build"
-pnpm install
-pnpm audit fix
-pnpm run build
+echo "npm build"
+npm install
+npm audit fix
+npm run build
 LAST_EXIT_CODE=$?
 if [ "$LAST_EXIT_CODE" -ne 0 ]; then
-	echo >&2 "pnpm run build failed!"
+	echo >&2 "npm run build failed!"
 	exit $LAST_EXIT_CODE
 fi
 

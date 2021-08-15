@@ -89,7 +89,7 @@ class WalletRpcClient(RpcClient):
 
     # Wallet Management APIs
     async def get_wallets(self) -> Dict:
-        return (await self.fetch("get_wallets", {}))["wallets"]
+        return (await self.fetch("get_wallets", ['chia','flax','goji']))["wallets"]
 
     # Wallet APIs
     async def get_wallet_balance(self, wallet_name: str, wallet_id: str) -> Dict:

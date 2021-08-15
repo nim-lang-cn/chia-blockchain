@@ -273,6 +273,7 @@ class FullNodeRpcApi:
         return {"block": block}
 
     async def get_blocks(self, request: Dict) -> Optional[Dict]:
+        self.service.log.warn(request)
         if "start" not in request:
             raise ValueError("No start in request")
         if "end" not in request:
@@ -283,10 +284,11 @@ class FullNodeRpcApi:
 
         start = int(request["start"])
         end = int(request["end"])
+        wallet_name = request["wallet_name"]
         block_range = []
         for a in range(start, end):
             block_range.append(uint32(a))
-        blocks: List[FullBlock] = await self.service.block_store.get_full_blocks_at(block_range)
+        blocks: List[FullBlock] = await self.service.block_store.get_full_blocks_at(block_range,wallet_name)
         json_blocks = []
         for block in blocks:
             json = block.to_json_dict()
